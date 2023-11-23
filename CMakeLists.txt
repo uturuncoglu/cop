@@ -28,7 +28,7 @@ list(APPEND cop_src_files
 ### Set variables
 ###############################################################################
 
-
+set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/mod)
 
 ###############################################################################
 ### Application
@@ -48,3 +48,8 @@ install(
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   COMPONENT Library)
+
+install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/mod DESTINATION ${CMAKE_INSTALL_PREFIX})
+
+install(EXPORT      cop-config
+        DESTINATION lib/cmake )
