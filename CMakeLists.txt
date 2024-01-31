@@ -11,11 +11,22 @@ project(cop
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 
 ###############################################################################
+### Build options
+###############################################################################
+
+option(COP_USE_CATALYST "Support Catalyst for Insitu Visualization" OFF)
+
+###############################################################################
 ### Set required packages
 ###############################################################################
 
-find_package(ESMF REQUIRED)
-find_package(catalyst 2.0 REQUIRED)
+if(NOT ESMF_FOUND)
+  find_package(ESMF REQUIRED)
+endif()
+
+if(COP_USE_CATALYST)
+  find_package(catalyst 2.0 REQUIRED)
+endif()
 
 ###############################################################################
 ### File lists and macros
@@ -36,8 +47,11 @@ set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/mod)
 ###############################################################################
 
 add_library(cop STATIC  ${cop_src_files})
-target_link_libraries(cop PRIVATE esmf catalyst::catalyst catalyst::catalyst_fortran)
 target_include_directories(cop PRIVATE ${ESMF_F90COMPILEPATHS}) 
+
+if(COP_USE_CATALYST)
+  target_link_libraries(cop PRIVATE esmf catalyst::catalyst catalyst::catalyst_fortran)
+endif()
 
 ###############################################################################
 ### Install
