@@ -22,7 +22,8 @@ find_package(catalyst 2.0 REQUIRED)
 ###############################################################################
 
 list(APPEND cop_src_files
-  cop_comp_nuopc.F90)
+  cop_comp_nuopc.F90
+  cop_comp_shr.F90)
 
 ###############################################################################
 ### Set variables
