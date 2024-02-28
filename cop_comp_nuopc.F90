@@ -4,29 +4,35 @@ module cop_comp_nuopc
   ! This is the NUOPC cap for generic co-processing component (COP)
   !-----------------------------------------------------------------------------
 
-  use ESMF , only : operator(==)
+  use ESMF, only: operator(==)
   use ESMF, only: ESMF_GridComp
-  use ESMF, only: ESMF_Field, ESMF_FieldGet
+  use ESMF, only: ESMF_Field, ESMF_FieldGet, ESMF_FieldEmptySet
   use ESMF, only: ESMF_State, ESMF_StateGet
   use ESMF, only: ESMF_Clock, ESMF_LogWrite
   use ESMF, only: ESMF_GridCompSetEntryPoint
+  use ESMF, only: ESMF_AttributeGet, ESMF_DistGridConnection
+  use ESMF, only: ESMF_Grid, ESMF_GridCreate, ESMF_GridGet
+  use ESMF, only: ESMF_DistGrid, ESMF_DistGridCreate, ESMF_DistGridGet
   use ESMF, only: ESMF_FAILURE, ESMF_LOGMSG_INFO, ESMF_SUCCESS
   use ESMF, only: ESMF_METHOD_INITIALIZE, ESMF_MAXSTR
   use ESMF, only: ESMF_GEOMTYPE_GRID, ESMF_GEOMTYPE_MESH
-  use ESMF, only: ESMF_FIELDSTATUS_GRIDSET, ESMF_FIELDSTATUS_EMPTY, ESMF_FIELDSTATUS_COMPLETE 
+  use ESMF, only: ESMF_FIELDSTATUS_GRIDSET, ESMF_FIELDSTATUS_EMPTY
+  use ESMF, only: ESMF_FIELDSTATUS_COMPLETE
   use ESMF, only: ESMF_GeomType_Flag, ESMF_FieldStatus_Flag
 
   use NUOPC, only: NUOPC_CompDerive
   use NUOPC, only: NUOPC_CompSpecialize
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_SetAttribute
+  use NUOPC, only: NUOPC_CompAttributeGet
+  use NUOPC, only: NUOPC_Realize
 
   use NUOPC_Model, only: SetVM
   use NUOPC_Model, only: NUOPC_ModelGet
   use NUOPC_Model, only: model_routine_SS => SetServices
   use NUOPC_Model, only: label_Advertise
   use NUOPC_Model, only: label_ModifyAdvertised
-  use NUOPC_Model, only: label_RealizeProvided
+  use NUOPC_Model, only: label_RealizeAccepted
   use NUOPC_Model, only: label_Advance
 
   !use catalyst_api
@@ -84,23 +90,17 @@ contains
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     !------------------
-    ! switching to IPD versions
-    !------------------
-
-    !call ESMF_GridCompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, userRoutine=InitializeP0, phase=0, rc=rc)
-    !if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-    !------------------
     ! specialize model
     !------------------
      
     call NUOPC_CompSpecialize(gcomp, specLabel=label_Advertise, specRoutine=Advertise, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
+    ! if we want to remove some fields from the list - we need to specialize this, otherwise not needed
     call NUOPC_CompSpecialize(gcomp, specLabel=label_ModifyAdvertised, specRoutine=ModifyAdvertised, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    call NUOPC_CompSpecialize(gcomp, specLabel=label_RealizeProvided, specRoutine=RealizeProvided, rc=rc)
+    call NUOPC_CompSpecialize(gcomp, specLabel=label_RealizeAccepted, specRoutine=RealizeAccepted, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     call NUOPC_CompSpecialize(gcomp, specLabel=label_Advance, specRoutine=Advance, rc=rc)
@@ -109,25 +109,6 @@ contains
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
   end subroutine SetServices
-
-  !-----------------------------------------------------------------------------
-
-  subroutine InitializeP0(gcomp, importState, exportState, clock, rc)
-
-    ! input/output variables
-    type(ESMF_GridComp)   :: gcomp
-    type(ESMF_State)      :: importState, exportState
-    type(ESMF_Clock)      :: clock
-    integer, intent(out)  :: rc
-    !-------------------------------------------------------------------------------
-
-    rc = ESMF_SUCCESS
-
-    ! Switch to IPDv05 by filtering all other phaseMap entries
-    call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, acceptStringList=(/"IPDv05p2"/), rc=rc)
-    if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-  end subroutine InitializeP0
 
   !-----------------------------------------------------------------------------
 
@@ -174,14 +155,29 @@ contains
     ! local variables
     integer :: n
     integer :: fieldCount
+    logical :: isPresent, isSet
     type(ESMF_Field) :: field
     type(ESMF_State) :: importState, exportState
     character(ESMF_MAXSTR), allocatable :: lfieldnamelist(:)
+    character(ESMF_MAXSTR) :: value, scalar_field_name = ''
     character(len=*), parameter :: subname = trim(modName)//':(ModifyAdvertised) '
     !---------------------------------------------------------------------------
 
     rc = ESMF_SUCCESS
     call ESMF_LogWrite(subname//' called', ESMF_LOGMSG_INFO)
+
+    !------------------
+    ! query for ScalarFieldName
+    !------------------
+
+    scalar_field_name = ""
+    call NUOPC_CompAttributeGet(gcomp, name="ScalarFieldName", value=value, &
+      isPresent=isPresent, isSet=isSet, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    if (isPresent .and. isSet) then
+       scalar_field_name = trim(value)
+       call ESMF_LogWrite(trim(subname)//":ScalarFieldName = "//trim(scalar_field_name), ESMF_LOGMSG_INFO)
+    endif
 
     !------------------
     ! query for importState and exportState
@@ -202,24 +198,30 @@ contains
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     do n = 1, fieldCount
-       ! Print out mirrored field name
-       call ESMF_LogWrite(trim(subname)//": "//trim(lfieldnamelist(n)), ESMF_LOGMSG_INFO)
-
        ! Get field from import state
        call ESMF_StateGet(importState, field=field, itemName=trim(lfieldnamelist(n)), rc=rc)
        if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-       ! Overwrite "ProducerTransferOffer" attribute, default is "cannot provide"
-       call NUOPC_SetAttribute(field, name="ProducerTransferOffer", value="will provide", rc=rc)
-       if (ChkErr(rc,__LINE__,u_FILE_u)) return
+       ! Remove field if it is cpl_scalars
+       !if (trim(lfieldnamelist(n)) == trim(scalar_field_name)) then
+       !   ! Print out mirrored field name
+       !   call ESMF_LogWrite(trim(subname)//": "//trim(lfieldnamelist(n))//" will be removed", ESMF_LOGMSG_INFO)
+       !    
+       !   ! Overwrite "ProducerTransferOffer" attribute, default is "cannot provide"
+       !   call NUOPC_SetAttribute(field, name="ProducerTransferOffer", value="will provide", rc=rc)
+       !   if (ChkErr(rc,__LINE__,u_FILE_u)) return
+       !else
+       !   ! Print out mirrored field name
+       !   call ESMF_LogWrite(trim(subname)//": "//trim(lfieldnamelist(n))//" will be removed", ESMF_LOGMSG_INFO)
+       !end if
 
        ! Overwrite "SharePolicyGeomObject" attribute, default is "not share"
-       call NUOPC_SetAttribute(field, name="SharePolicyGeomObject", value="share", rc=rc)
-       if (ChkErr(rc,__LINE__,u_FILE_u)) return
+       !call NUOPC_SetAttribute(field, name="SharePolicyGeomObject", value="share", rc=rc)
+       !if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
        ! Overwrite "SharePolicyField" attribute, default is "not share"
-       call NUOPC_SetAttribute(field, name="SharePolicyField", value="share", rc=rc)
-       if (ChkErr(rc,__LINE__,u_FILE_u)) return
+       !call NUOPC_SetAttribute(field, name="SharePolicyField", value="share", rc=rc)
+       !if (ChkErr(rc,__LINE__,u_FILE_u)) return
     end do
 
     ! Clean memory
@@ -231,21 +233,26 @@ contains
 
   !-----------------------------------------------------------------------------
 
-  subroutine RealizeProvided(gcomp, rc)
+  subroutine RealizeAccepted(gcomp, rc)
 
     ! input/output variables
     type(ESMF_GridComp) :: gcomp
     integer, intent(out) :: rc
 
     ! local variables
-    integer :: n
-    integer :: fieldCount
+    integer :: n, m
+    integer :: fieldCount, arbDimCount
+    integer :: dimCount, tileCount, connectionCount
+    integer, allocatable :: minIndexPTile(:,:), maxIndexPTile(:,:)
+    type(ESMF_Grid) :: newgrid, grid
+    type(ESMF_DistGrid) :: distgrid
     type(ESMF_Field) :: field
     type(ESMF_GeomType_Flag) :: geomType
     type(ESMF_FieldStatus_Flag) :: fieldStatus
     type(ESMF_State) :: importState, exportState
+    type(ESMF_DistGridConnection) , allocatable :: connectionList(:)
     character(ESMF_MAXSTR), allocatable :: lfieldnamelist(:)
-    character(len=*), parameter :: subname = trim(modName)//':(RealizeProvided) '
+    character(len=*), parameter :: subname = trim(modName)//':(RealizeAccepted) '
     !---------------------------------------------------------------------------
 
     rc = ESMF_SUCCESS
@@ -287,6 +294,100 @@ contains
           if (geomtype == ESMF_GEOMTYPE_GRID) then
              call ESMF_LogWrite(trim(subname)//": geomType is ESMF_GEOMTYPE_GRID for "//trim(lfieldnamelist(n)), ESMF_LOGMSG_INFO)
 
+             ! Check ArbDimCount
+             call ESMF_AttributeGet(field, name="ArbDimCount", value=arbDimCount, &
+               convention="NUOPC", purpose="Instance", rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+             ! Make decision on whether the incoming Grid is arbDistr or not
+             if (arbDimCount > 0) then
+                ! Allocate required arrays
+                allocate(minIndexPTile(arbDimCount,1))
+                allocate(maxIndexPTile(arbDimCount,1))
+
+                ! Query attributes
+                call ESMF_AttributeGet(field, name="MinIndex", valueList=minIndexPTile(:,1), &
+                  convention="NUOPC", purpose="Instance", rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+                call ESMF_AttributeGet(field, name="MaxIndex", valueList=maxIndexPTile(:,1), &
+                  convention="NUOPC", purpose="Instance", rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                ! Create DistGrid
+                distgrid = ESMF_DistGridCreate(minIndexPTile=minIndexPTile, maxIndexPTile=maxIndexPTile, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                ! Create grid with new decomposition
+                newgrid = ESMF_GridCreate(distgrid, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+             else ! arbdimcount <= 0
+                ! Query field to get grid
+                call ESMF_FieldGet(field, grid=grid, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                ! Query grid
+                call ESMF_GridGet(grid, distgrid=distgrid, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                ! Query DistGrid
+                call ESMF_DistGridGet(distgrid, dimCount=dimCount, tileCount=tileCount, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                ! Allocate required arrays
+                allocate(minIndexPTile(dimCount, tileCount))
+                allocate(maxIndexPTile(dimCount, tileCount))
+
+                ! Query DistGrid
+                call ESMF_DistGridGet(distgrid, minIndexPTile=minIndexPTile, maxIndexPTile=maxIndexPTile, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                ! Create grid with new decomposition
+                if (dimcount == 2) then
+                   ! Query DistGrid
+                   call ESMF_DistGridGet(distgrid, connectionCount=connectionCount, rc=rc)
+                   if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                   ! Allocate connectionList and fill it
+                   allocate(connectionList(connectionCount))
+                   call ESMF_DistGridGet(distgrid, connectionList=connectionList, rc=rc)
+                   if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                   ! Create DistGrid
+                   distgrid = ESMF_DistGridCreate(minIndexPTile=minIndexPTile, maxIndexPTile=maxIndexPTile, connectionList=connectionList, rc=rc)
+                   if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                   ! Create new grid
+                   newgrid = ESMF_GridCreate(distgrid, gridEdgeLWidth=(/0,0/), gridEdgeUWidth=(/0,1/), rc=rc)
+                   if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                   ! Remove temporary array
+                   deallocate(connectionList)
+
+                else
+                   ! Create DistGrid
+                   distgrid = ESMF_DistGridCreate(minIndexPTile=minIndexPTile, maxIndexPTile=maxIndexPTile, rc=rc)
+                   if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                   ! Create new grid
+                   newgrid = ESMF_GridCreate(distgrid, gridEdgeLWidth=(/0/), gridEdgeUWidth=(/0/), rc=rc)
+                   if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                end if
+             end if
+
+             ! Remove temporary arrays
+             deallocate(minIndexPTile, maxIndexPTile)
+
+             ! Swap grid
+             if (fieldStatus==ESMF_FIELDSTATUS_EMPTY .or. fieldStatus==ESMF_FIELDSTATUS_GRIDSET) then
+                call ESMF_LogWrite(trim(subname)//": replace grid for "//trim(lfieldnamelist(n)), ESMF_LOGMSG_INFO)
+                call ESMF_FieldEmptySet(field, grid=newgrid, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+             else
+                call ESMF_LogWrite(trim(subname)//": NOT replacing grid for "//trim(lfieldnamelist(n)), ESMF_LOGMSG_INFO)
+             end if
+
           elseif (geomtype == ESMF_GEOMTYPE_MESH) then
              call ESMF_LogWrite(trim(subname)//": geomType is ESMF_GEOMTYPE_MESH for "//trim(lfieldnamelist(n)), ESMF_LOGMSG_INFO)
 
@@ -309,6 +410,11 @@ contains
           return 
 
        end if ! fieldStatus
+
+       ! Realize the advertised field
+       call NUOPC_Realize(importState, fieldName=trim(lfieldnamelist(n)), rc=rc)
+       if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
     end do
 
     ! Clean memory
@@ -316,7 +422,7 @@ contains
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
  
-  end subroutine RealizeProvided
+  end subroutine RealizeAccepted
 
   !-----------------------------------------------------------------------------
 
@@ -339,5 +445,8 @@ contains
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
   end subroutine Advance
+
+  ! different run phase for each workflow / very high level
+
 
 end module cop_comp_nuopc
