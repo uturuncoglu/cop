@@ -196,6 +196,7 @@ contains
       isPresent=isPresent, isSet=isSet, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
+    m = 0
     if (isPresent .and. isSet) then
        ! Get number of fields in the list
        m = StringListGetNum(cvalue, ":")
