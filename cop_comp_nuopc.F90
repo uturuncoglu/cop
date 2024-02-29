@@ -67,6 +67,7 @@ module cop_comp_nuopc
   ! Private module data
   !-----------------------------------------------------------------------------
 
+  integer :: dbug = 0
   character(len=*), parameter :: modName = "(cop_comp_nuopc)"
   character(len=*), parameter :: u_FILE_u = __FILE__
 
@@ -101,10 +102,11 @@ contains
     call NUOPC_CompSpecialize(gcomp, specLabel=label_Advertise, specRoutine=Advertise, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    ! if we want to remove some fields from the list - we need to specialize this, otherwise not needed
+    ! It is used to remove some fields from the list of mirrored fields
     call NUOPC_CompSpecialize(gcomp, specLabel=label_ModifyAdvertised, specRoutine=ModifyAdvertised, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
+    ! It is used to realized mirrored fields and also update decomposition
     call NUOPC_CompSpecialize(gcomp, specLabel=label_RealizeAccepted, specRoutine=RealizeAccepted, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
@@ -166,7 +168,7 @@ contains
     type(ESMF_State) :: importState, exportState
     character(ESMF_MAXSTR), allocatable :: rfieldnamelist(:)
     character(ESMF_MAXSTR), allocatable :: lfieldnamelist(:)
-    character(ESMF_MAXSTR) :: message, cname, value, scalar_field_name = ''
+    character(ESMF_MAXSTR) :: message, cname, cvalue, scalar_field_name = ''
     character(len=*), parameter :: subname = trim(modName)//':(ModifyAdvertised) '
     !---------------------------------------------------------------------------
 
@@ -178,11 +180,11 @@ contains
     !------------------
 
     scalar_field_name = ""
-    call NUOPC_CompAttributeGet(gcomp, name="ScalarFieldName", value=value, &
+    call NUOPC_CompAttributeGet(gcomp, name="ScalarFieldName", value=cvalue, &
       isPresent=isPresent, isSet=isSet, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
     if (isPresent .and. isSet) then
-       scalar_field_name = trim(value)
+       scalar_field_name = trim(cvalue)
        call ESMF_LogWrite(trim(subname)//":ScalarFieldName = "//trim(scalar_field_name), ESMF_LOGMSG_INFO)
     endif
 
@@ -190,20 +192,20 @@ contains
     ! query for RemoveFieldList
     !------------------
 
-    call NUOPC_CompAttributeGet(gcomp, name="RemoveFieldList", value=value, &
+    call NUOPC_CompAttributeGet(gcomp, name="RemoveFieldList", value=cvalue, &
       isPresent=isPresent, isSet=isSet, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     if (isPresent .and. isSet) then
        ! Get number of fields in the list
-       m = StringListGetNum(value, ":")
+       m = StringListGetNum(cvalue, ":")
        if (m > 0) then
           ! Allocate temporary array for field list
           allocate(rfieldnamelist(m))
 
           ! Loop over occurances and fill the field list
           do n = 1, m 
-             call StringListGetName(value, n, cname, ':', rc)        
+             call StringListGetName(cvalue, n, cname, ':', rc)        
              if (ChkErr(rc,__LINE__,u_FILE_u)) return
              rfieldnamelist(n) = trim(cname)
              write(message, fmt='(A,I2.2,A)') trim(subname)//':RemoveFieldList(',n,') = '//trim(rfieldnamelist(n))
@@ -474,12 +476,29 @@ contains
     type(ESMF_Time) :: currTime
     type(ESMF_Clock) :: clock
     type(ESMF_State) :: importState, exportState
+    logical :: isPresent, isSet 
+    character(len=ESMF_MAXSTR) :: message
+    character(len=ESMF_MAXSTR) :: cvalue 
     character(len=ESMF_MAXSTR) :: timeStr
     character(len=*), parameter :: subname = trim(modName)//':(Advance) '
     !---------------------------------------------------------------------------
 
     rc = ESMF_SUCCESS
     call ESMF_LogWrite(subname//' called', ESMF_LOGMSG_INFO)
+
+    !------------------
+    ! query for DebugLevel 
+    !------------------
+
+    call NUOPC_CompAttributeGet(gcomp, name='DebugLevel', value=cvalue, &
+      isPresent=isPresent, isSet=isSet, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    if (isPresent .and. isSet) then
+       read(cvalue,*) dbug
+    end if
+    write(message, fmt='(A,L)') trim(subname)//': DebugLevel = ', dbug
+    call ESMF_LogWrite(trim(message), ESMF_LOGMSG_INFO)
 
     !------------------
     ! query for clock, importState and exportState
@@ -495,11 +514,13 @@ contains
     ! Write import state (for debugging)
     !------------------
 
-    call ESMF_TimeGet(currTime, timeStringISOFrac=timeStr , rc=rc)
-    if (ChkErr(rc,__LINE__,u_FILE_u)) return  
+    if (dbug > 5) then
+       call ESMF_TimeGet(currTime, timeStringISOFrac=timeStr , rc=rc)
+       if (ChkErr(rc,__LINE__,u_FILE_u)) return  
 
-    call StateWrite(importState, 'import_'//trim(timeStr), rc=rc)
-    if (ChkErr(rc,__LINE__,u_FILE_u)) return 
+       call StateWrite(importState, 'import_'//trim(timeStr), rc=rc)
+       if (ChkErr(rc,__LINE__,u_FILE_u)) return 
+    end if
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
