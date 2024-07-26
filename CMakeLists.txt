@@ -33,6 +33,7 @@ endif()
 ###############################################################################
 
 list(APPEND cop_src_files
+  cop_comp_internalstate.F90
   cop_comp_nuopc.F90
   cop_comp_shr.F90)
 
@@ -49,6 +50,8 @@ set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/mod)
 add_library(cop STATIC  ${cop_src_files})
 target_include_directories(cop PRIVATE ${ESMF_F90COMPILEPATHS}) 
 
+add_subdirectory(plugins/catalyst)
+add_dependencies(cop cop_catalyst)
 if(COP_USE_CATALYST)
   target_link_libraries(cop PRIVATE esmf catalyst::catalyst catalyst::catalyst_fortran)
 endif()

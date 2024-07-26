@@ -4,12 +4,14 @@ module cop_comp_shr
   ! This is the module for shared routines 
   !-----------------------------------------------------------------------------
 
-  use ESMF, only: operator(==)
-  use ESMF, only: ESMF_LogFoundError, ESMF_FAILURE, ESMF_LogWrite
-  use ESMF, only: ESMF_LOGERR_PASSTHRU, ESMF_LOGMSG_INFO, ESMF_SUCCESS
-  use ESMF, only: ESMF_GeomType_Flag, ESMF_State, ESMF_StateGet
-  use ESMF, only: ESMF_Field, ESMF_FieldGet, ESMF_FieldWrite, ESMF_FieldWriteVTK
-  use ESMF, only: ESMF_MAXSTR, ESMF_GEOMTYPE_GRID, ESMF_GEOMTYPE_MESH
+  use ESMF , only: operator(==)
+  use ESMF , only: ESMF_LogFoundError, ESMF_FAILURE, ESMF_LogWrite
+  use ESMF , only: ESMF_LOGERR_PASSTHRU, ESMF_LOGMSG_INFO, ESMF_SUCCESS
+  use ESMF , only: ESMF_GeomType_Flag, ESMF_State, ESMF_StateGet
+  use ESMF , only: ESMF_Field, ESMF_FieldGet, ESMF_FieldWrite, ESMF_FieldWriteVTK
+  use ESMF , only: ESMF_MAXSTR, ESMF_GEOMTYPE_GRID, ESMF_GEOMTYPE_MESH
+
+  use NUOPC, only: NUOPC_GetAttribute
 
   implicit none
   private
@@ -49,6 +51,29 @@ module cop_comp_shr
        ChkErr = .true.
     endif
   end function ChkErr
+
+  !-----------------------------------------------------------------------------
+
+  !subroutine FBInit(FBout, )
+
+    ! ----------------------------------------------
+    ! Create field bundle from state 
+    ! ----------------------------------------------
+
+    ! input/output variables
+  !  type(ESMF_State) :: state
+  !  character(len=*), intent(in) :: prefix
+  !  integer, intent(out), optional :: rc
+
+    ! local variables
+  !  integer :: n, fieldCount
+  !  type(ESMF_Field) :: field
+  !  type(ESMF_GeomType_Flag) :: geomType
+  !  character(ESMF_MAXSTR), allocatable :: lfieldnamelist(:)
+  !  character(len=*), parameter :: subname = trim(modName)//':(StateWrite) '
+    !---------------------------------------------------------------------------
+
+  !end subroutine FBInit
 
   !-----------------------------------------------------------------------------
 
@@ -161,6 +186,10 @@ module cop_comp_shr
 
   subroutine StateWrite(state, prefix, rc)
 
+    ! ----------------------------------------------
+    ! Write fields in state
+    ! ----------------------------------------------
+
     ! input/output variables
     type(ESMF_State) :: state
     character(len=*), intent(in) :: prefix 
@@ -170,6 +199,8 @@ module cop_comp_shr
     integer :: n, fieldCount
     type(ESMF_Field) :: field
     type(ESMF_GeomType_Flag) :: geomType    
+    logical :: isPresent, isSet
+    character(ESMF_MAXSTR) :: cvalue
     character(ESMF_MAXSTR), allocatable :: lfieldnamelist(:)
     character(len=*), parameter :: subname = trim(modName)//':(StateWrite) '
     !---------------------------------------------------------------------------
@@ -210,6 +241,15 @@ module cop_comp_shr
           rc=ESMF_FAILURE
           return
        end if ! geomType
+
+       ! Write field metadata
+       call NUOPC_GetAttribute(field, name='Units', value=cvalue, isPresent=isPresent, isSet=isSet, rc=rc)
+       if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+       if (isPresent .and. isSet) then
+          call ESMF_LogWrite(trim(subname)//": Units = "//trim(cvalue), ESMF_LOGMSG_INFO)
+       end if
+
     end do
 
     ! Clean memory
