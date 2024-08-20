@@ -56,6 +56,10 @@ if(COP_USE_CATALYST)
   target_link_libraries(cop PRIVATE esmf catalyst::catalyst catalyst::catalyst_fortran)
 endif()
 
+add_subdirectory(plugins/io)
+add_dependencies(cop cop_io)
+target_link_libraries(cop PRIVATE cop_io)
+
 ###############################################################################
 ### Install
 ###############################################################################
