@@ -9,7 +9,9 @@ module cop_comp_shr
   use ESMF , only: ESMF_LOGERR_PASSTHRU, ESMF_LOGMSG_INFO, ESMF_SUCCESS
   use ESMF , only: ESMF_GeomType_Flag, ESMF_State, ESMF_StateGet
   use ESMF , only: ESMF_Field, ESMF_FieldGet, ESMF_FieldWrite, ESMF_FieldWriteVTK
+  use ESMF , only: ESMF_FieldBundle, ESMF_FieldBundleCreate
   use ESMF , only: ESMF_MAXSTR, ESMF_GEOMTYPE_GRID, ESMF_GEOMTYPE_MESH
+  use ESMF , only: ESMF_StateGet, ESMF_StateItem_Flag, ESMF_STATEITEM_STATE
 
   use NUOPC, only: NUOPC_GetAttribute
 
@@ -21,6 +23,7 @@ module cop_comp_shr
   !-----------------------------------------------------------------------------
 
   public :: ChkErr
+  public :: FB_init_pointer
   public :: StringCountChar
   public :: StringListGetName
   public :: StringListGetNum
@@ -184,6 +187,48 @@ module cop_comp_shr
 
   !-----------------------------------------------------------------------------
 
+  subroutine FB_init_pointer(StateIn, FBout, name, rc)
+
+    ! input/output variables
+    type(ESMF_State), intent(in) :: StateIn
+    type(ESMF_FieldBundle), intent(inout) :: FBout
+    character(len=*), intent(in) :: name
+    integer, intent(out), optional :: rc
+
+    ! local variables
+    integer :: fieldCount
+    character(ESMF_MAXSTR), allocatable :: lfieldNameList(:)
+    character(len=*), parameter :: subname = trim(modName)//':(FB_init_pointer) '
+    !---------------------------------------------------------------------------
+
+    rc = ESMF_SUCCESS
+    call ESMF_LogWrite(subname//' called', ESMF_LOGMSG_INFO)
+
+    ! Create empty FBout
+    FBout = ESMF_FieldBundleCreate(name=trim(name), rc=rc)
+    if (chkerr(rc,__LINE__,u_FILE_u)) return
+
+    ! Get fields from state
+    call ESMF_StateGet(StateIn, itemCount=fieldCount, rc=rc)
+    if (chkerr(rc,__LINE__,u_FILE_u)) return
+    allocate(lfieldNameList(fieldCount))
+    call ESMF_StateGet(StateIn, itemNameList=lfieldNameList, rc=rc)
+    if (chkerr(rc,__LINE__,u_FILE_u)) return
+
+    ! Create field bundle
+    !if (fieldCount > 0) then
+    !   ! Get mesh from first non-scalar field in StateIn (assumes all the fields have the same mesh)
+    !   call ESMF_StateGet(StateIn, itemName=lfieldNameList(1), field=lfield, rc=rc)
+    !   if (chkerr(rc,__LINE__,u_FILE_u)) return
+    !end if
+
+
+    call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
+
+  end subroutine FB_init_pointer
+
+  !-----------------------------------------------------------------------------
+
   subroutine StateWrite(state, prefix, rc)
 
     ! ----------------------------------------------
@@ -196,64 +241,92 @@ module cop_comp_shr
     integer, intent(out), optional :: rc
 
     ! local variables
-    integer :: n, fieldCount
+    integer :: i, n
+    integer :: itemCount, fieldCount
+    type(ESMF_State) :: nestedState
     type(ESMF_Field) :: field
     type(ESMF_GeomType_Flag) :: geomType    
-    logical :: isPresent, isSet
+    logical :: hasNested, isPresent, isSet
     character(ESMF_MAXSTR) :: cvalue
-    character(ESMF_MAXSTR), allocatable :: lfieldnamelist(:)
+    character(ESMF_MAXSTR) :: stateName
+    character(ESMF_MAXSTR), allocatable :: itemNameList(:)
+    character(ESMF_MAXSTR), allocatable :: fieldNameList(:)
+    type(ESMF_StateItem_Flag), allocatable  :: itemTypeList(:)
     character(len=*), parameter :: subname = trim(modName)//':(StateWrite) '
     !---------------------------------------------------------------------------
 
     rc = ESMF_SUCCESS
     call ESMF_LogWrite(subname//' called', ESMF_LOGMSG_INFO)
 
-    !------------------
-    ! loop over fields in state
-    !------------------
-
-    call ESMF_StateGet(state, itemCount=fieldCount, rc=rc)
+    ! Query state
+    call ESMF_StateGet(state, nestedFlag=.false., itemCount=itemCount, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    if (.not. allocated(lfieldnamelist)) allocate(lfieldnamelist(fieldCount))
+    ! Allocate temporary data structures
+    allocate(itemNameList(itemCount))
+    allocate(itemTypeList(itemCount))
 
-    call ESMF_StateGet(state, itemNameList=lfieldnamelist, rc=rc)
+    ! Query state for items
+    call ESMF_StateGet(state, itemNameList=itemNameList, itemTypeList=itemTypeList, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    do n = 1, fieldCount
-       ! Get field from import state
-       call ESMF_StateGet(state, field=field, itemName=trim(lfieldnamelist(n)), rc=rc)
-       if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-       ! Get geom type
-       call ESMF_FieldGet(field, geomtype=geomType, rc=rc)
-       if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-       ! Write field 
-       if (geomtype == ESMF_GEOMTYPE_GRID) then
-          call ESMF_FieldWrite(field, trim(prefix)//'_'//trim(lfieldnamelist(n))//'.nc', variableName=trim(lfieldnamelist(n)), overwrite=.true., rc=rc)
-          if (ChkErr(rc,__LINE__,u_FILE_u)) return
-       elseif (geomtype == ESMF_GEOMTYPE_MESH) then
-          call ESMF_FieldWriteVTK(field, trim(prefix)//'_'//trim(lfieldnamelist(n)), rc=rc)
-          if (ChkErr(rc,__LINE__,u_FILE_u)) return
-       else
-          call ESMF_LogWrite(trim(subname)//": ERROR geomType not supported ", ESMF_LOGMSG_INFO)
-          rc=ESMF_FAILURE
-          return
-       end if ! geomType
-
-       ! Write field metadata
-       call NUOPC_GetAttribute(field, name='Units', value=cvalue, isPresent=isPresent, isSet=isSet, rc=rc)
-       if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-       if (isPresent .and. isSet) then
-          call ESMF_LogWrite(trim(subname)//": Units = "//trim(cvalue), ESMF_LOGMSG_INFO)
-       end if
-
+    ! Set flag if nested state is found
+    do i = 1, itemCount
+       if (itemTypeList(i) == ESMF_STATEITEM_STATE) hasNested = .true.
     end do
 
+    ! Loop over states
+    if (hasNested) then
+       do i = 1, itemCount
+          if (itemTypeList(i) == ESMF_STATEITEM_STATE) then
+             ! Get the associated nested state
+             call ESMF_StateGet(state, itemName=itemNameList(i), nestedState=nestedState, rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+             ! Query nested state for fields
+             call ESMF_StateGet(nestedState, itemCount=fieldCount, name=stateName, rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+             ! Allocate temporary data structure
+             allocate(fieldNameList(fieldCount))
+
+             ! Query state for field list
+             call ESMF_StateGet(nestedState, itemNameList=fieldNameList, rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+             ! Loop over fields
+             do n = 1, fieldCount
+                ! Query state for field
+                call ESMF_StateGet(nestedState, field=field, itemName=trim(fieldNameList(n)), rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                ! Get geom type
+                call ESMF_FieldGet(field, geomtype=geomType, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                ! Write field
+                if (geomtype == ESMF_GEOMTYPE_GRID) then
+                   call ESMF_FieldWrite(field, trim(stateName)//'_'//trim(prefix)//'_'//trim(fieldNameList(n))//'.nc', variableName=trim(fieldNameList(n)), overwrite=.true., rc=rc)
+                   if (ChkErr(rc,__LINE__,u_FILE_u)) return
+                elseif (geomtype == ESMF_GEOMTYPE_MESH) then
+                   call ESMF_FieldWriteVTK(field, trim(stateName)//'_'//trim(prefix)//'_'//trim(fieldNameList(n)), rc=rc)
+                   if (ChkErr(rc,__LINE__,u_FILE_u)) return
+                else
+                   call ESMF_LogWrite(trim(subname)//": ERROR geomType not supported ", ESMF_LOGMSG_INFO)
+                   rc=ESMF_FAILURE
+                   return
+                end if ! geomType
+             end do
+
+             ! Clear memeory
+             deallocate(fieldNameList)
+          end if
+       end do
+    end if
+
     ! Clean memory
-    deallocate(lfieldnamelist)
+    deallocate(itemNameList)
+    deallocate(itemTypeList)
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 

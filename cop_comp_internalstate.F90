@@ -125,7 +125,7 @@ module cop_comp_internalstate
     end if
 
     !------------------
-    ! Fill component names
+    ! Fill component names and link states
     !------------------
 
     if (nestedStateCount > 0) then

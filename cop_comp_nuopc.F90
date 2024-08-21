@@ -25,12 +25,13 @@ module cop_comp_nuopc
   use ESMF, only: ESMF_Time, ESMF_TimeGet
   use ESMF, only: ESMF_Clock, ESMF_ClockGet
   use ESMF, only: ESMF_DistGridGet, ESMF_DistGridConnection
+  use ESMF, only: ESMF_StateIsCreated
 
   use NUOPC, only: NUOPC_CompDerive
   use NUOPC, only: NUOPC_CompSpecialize
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_SetAttribute, NUOPC_GetAttribute
-  use NUOPC, only: NUOPC_CompAttributeGet
+  use NUOPC, only: NUOPC_CompAttributeGet, NUOPC_CompAttributeSet
   use NUOPC, only: NUOPC_Realize
   use NUOPC, only: NUOPC_AddNamespace
  
@@ -38,6 +39,7 @@ module cop_comp_nuopc
   use NUOPC_Model, only: NUOPC_ModelGet
   use NUOPC_Model, only: model_routine_SS => SetServices
   use NUOPC_Model, only: model_routine_Run => routine_Run
+  use NUOPC_Model, only: model_label_DataInitialize => label_DataInitialize
   use NUOPC_Model, only: model_label_Advance => label_Advance
   use NUOPC_Model, only: label_Advertise
   use NUOPC_Model, only: label_ModifyAdvertised
@@ -45,9 +47,9 @@ module cop_comp_nuopc
   use NUOPC_Model, only: label_Advance
 
   use cop_comp_shr, only: ChkErr
+  use cop_comp_shr, only: FB_init_pointer
   use cop_comp_shr, only: StringListGetName
   use cop_comp_shr, only: StringListGetNum
-  use cop_comp_shr, only: StateWrite
   
   use cop_comp_internalstate, only: InternalState
   use cop_comp_internalstate, only: InternalStateInit 
@@ -68,7 +70,7 @@ module cop_comp_nuopc
   ! Private module routines
   !-----------------------------------------------------------------------------
 
-  !private :: InitializeP0
+  private :: DataInitialize
 
   !-----------------------------------------------------------------------------
   ! Private module data
@@ -118,8 +120,12 @@ contains
     call NUOPC_CompSpecialize(gcomp, specLabel=label_RealizeAccepted, specRoutine=RealizeAccepted, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
+    ! It is used for data initialization
+    call NUOPC_CompSpecialize(gcomp, specLabel=model_label_DataInitialize, specRoutine=DataInitialize, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
     ! It is used to run user specified phase to process the data
-    call NUOPC_CompSpecialize(gcomp, specLabel=label_Advance, specRoutine=Advance, rc=rc)
+    call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, specRoutine=Advance, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     !------------------
@@ -184,7 +190,7 @@ contains
     ! It indicates that fields should be mirrored in the State of a connected component
     !------------------
 
-    call NUOPC_SetAttribute(importState, "FieldTransferPolicy", "transferAllNested", rc=rc)
+    call NUOPC_SetAttribute(importState, "FieldTransferPolicy", "transferAllAsNests", rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
@@ -415,13 +421,6 @@ contains
        end do
     end if
 
-    !------------------
-    ! Setup internal state 
-    !------------------
-
-    call InternalStateInit(gcomp, rc)
-    if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
     
   end subroutine ModifyAdvertised
@@ -460,6 +459,21 @@ contains
     call ESMF_LogWrite(subname//' called', ESMF_LOGMSG_INFO)
 
     !------------------
+    ! Query internal state
+    !------------------
+
+    nullify(is_local%wrap)
+    call ESMF_GridCompGetInternalState(gcomp, is_local, rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    !------------------
+    ! Setup internal state
+    !------------------
+
+    call InternalStateInit(gcomp, rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    !------------------
     ! Query for importState
     !------------------
 
@@ -495,11 +509,11 @@ contains
        do i = 1, importItemCount
           if (importItemTypeList(i) == ESMF_STATEITEM_STATE) then
              ! Get the associated nested state
-             call ESMF_StateGet(importState, itemName=importItemNameList(i), nestedState=importNestedState, rc=rc)
+             call ESMF_StateGet(importState, itemName=importItemNameList(i), nestedState=is_local%wrap%NStateImp(i), rc=rc)
              if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
              ! Replace decomposition
-             call ModifyDecomp(importNestedState, realize=.true., rc=rc)
+             call ModifyDecomp(is_local%wrap%NStateImp(i), realize=.true., rc=rc)
              if (ChkErr(rc,__LINE__,u_FILE_u)) return
           end if
        end do
@@ -508,6 +522,60 @@ contains
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
  
   end subroutine RealizeAccepted
+
+  !-----------------------------------------------------------------------------
+
+  subroutine DataInitialize(gcomp, rc)
+
+    ! input/output variables
+    type(ESMF_GridComp) :: gcomp
+    integer, intent(out) :: rc
+
+    ! local variables
+    integer :: n
+    type(InternalState) :: is_local
+    logical, save :: first_call = .true.
+    character(len=*), parameter :: subname = trim(modName)//':(DataInitialize) '
+    !---------------------------------------------------------------------------
+
+    rc = ESMF_SUCCESS
+    call ESMF_LogWrite(subname//' called', ESMF_LOGMSG_INFO)
+
+    ! Get the internal state
+    nullify(is_local%wrap)
+    call ESMF_GridCompGetInternalState(gcomp, is_local, rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    ! First call block
+    if (first_call) then
+       ! Create field bundle FBImp
+       do n = 1, is_local%wrap%numComp
+          if (ESMF_StateIsCreated(is_local%wrap%NStateImp(n), rc=rc)) then
+             ! Print debug info
+             call ESMF_LogWrite(trim(subname)//': initializing FBs for '//trim(is_local%wrap%compName(n)), ESMF_LOGMSG_INFO)
+
+             ! Create FBImp(:) with pointers directly into NStateImp(:)
+             call FB_init_pointer(is_local%wrap%NStateImp(n), is_local%wrap%FBImp(n), name='FBImp'//trim(is_local%wrap%compName(n)), rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+          end if
+       end do
+
+       ! Set first call flag
+       first_call = .false.
+
+       ! Return
+       return
+    end if
+
+    ! Set InitializeDataComplete Component Attribute to "true", indicating
+    ! to the driver that this Component has fully initialized its data
+    call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", value="true", rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    call ESMF_LogWrite("COP - Initialize-Data-Dependency allDone check Passed", ESMF_LOGMSG_INFO)
+
+    call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
+
+  end subroutine DataInitialize
 
   !-----------------------------------------------------------------------------
 
