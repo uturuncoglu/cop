@@ -27,7 +27,6 @@ module cop_comp_shr
   public :: StringCountChar
   public :: StringListGetName
   public :: StringListGetNum
-  public :: StateWrite
 
   !-----------------------------------------------------------------------------
   ! Private module data
@@ -54,29 +53,6 @@ module cop_comp_shr
        ChkErr = .true.
     endif
   end function ChkErr
-
-  !-----------------------------------------------------------------------------
-
-  !subroutine FBInit(FBout, )
-
-    ! ----------------------------------------------
-    ! Create field bundle from state 
-    ! ----------------------------------------------
-
-    ! input/output variables
-  !  type(ESMF_State) :: state
-  !  character(len=*), intent(in) :: prefix
-  !  integer, intent(out), optional :: rc
-
-    ! local variables
-  !  integer :: n, fieldCount
-  !  type(ESMF_Field) :: field
-  !  type(ESMF_GeomType_Flag) :: geomType
-  !  character(ESMF_MAXSTR), allocatable :: lfieldnamelist(:)
-  !  character(len=*), parameter :: subname = trim(modName)//':(StateWrite) '
-    !---------------------------------------------------------------------------
-
-  !end subroutine FBInit
 
   !-----------------------------------------------------------------------------
 
@@ -226,110 +202,5 @@ module cop_comp_shr
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
   end subroutine FB_init_pointer
-
-  !-----------------------------------------------------------------------------
-
-  subroutine StateWrite(state, prefix, rc)
-
-    ! ----------------------------------------------
-    ! Write fields in state
-    ! ----------------------------------------------
-
-    ! input/output variables
-    type(ESMF_State) :: state
-    character(len=*), intent(in) :: prefix 
-    integer, intent(out), optional :: rc
-
-    ! local variables
-    integer :: i, n
-    integer :: itemCount, fieldCount
-    type(ESMF_State) :: nestedState
-    type(ESMF_Field) :: field
-    type(ESMF_GeomType_Flag) :: geomType    
-    logical :: hasNested, isPresent, isSet
-    character(ESMF_MAXSTR) :: cvalue
-    character(ESMF_MAXSTR) :: stateName
-    character(ESMF_MAXSTR), allocatable :: itemNameList(:)
-    character(ESMF_MAXSTR), allocatable :: fieldNameList(:)
-    type(ESMF_StateItem_Flag), allocatable  :: itemTypeList(:)
-    character(len=*), parameter :: subname = trim(modName)//':(StateWrite) '
-    !---------------------------------------------------------------------------
-
-    rc = ESMF_SUCCESS
-    call ESMF_LogWrite(subname//' called', ESMF_LOGMSG_INFO)
-
-    ! Query state
-    call ESMF_StateGet(state, nestedFlag=.false., itemCount=itemCount, rc=rc)
-    if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-    ! Allocate temporary data structures
-    allocate(itemNameList(itemCount))
-    allocate(itemTypeList(itemCount))
-
-    ! Query state for items
-    call ESMF_StateGet(state, itemNameList=itemNameList, itemTypeList=itemTypeList, rc=rc)
-    if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-    ! Set flag if nested state is found
-    do i = 1, itemCount
-       if (itemTypeList(i) == ESMF_STATEITEM_STATE) hasNested = .true.
-    end do
-
-    ! Loop over states
-    if (hasNested) then
-       do i = 1, itemCount
-          if (itemTypeList(i) == ESMF_STATEITEM_STATE) then
-             ! Get the associated nested state
-             call ESMF_StateGet(state, itemName=itemNameList(i), nestedState=nestedState, rc=rc)
-             if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-             ! Query nested state for fields
-             call ESMF_StateGet(nestedState, itemCount=fieldCount, name=stateName, rc=rc)
-             if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-             ! Allocate temporary data structure
-             allocate(fieldNameList(fieldCount))
-
-             ! Query state for field list
-             call ESMF_StateGet(nestedState, itemNameList=fieldNameList, rc=rc)
-             if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-             ! Loop over fields
-             do n = 1, fieldCount
-                ! Query state for field
-                call ESMF_StateGet(nestedState, field=field, itemName=trim(fieldNameList(n)), rc=rc)
-                if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-                ! Get geom type
-                call ESMF_FieldGet(field, geomtype=geomType, rc=rc)
-                if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-                ! Write field
-                if (geomtype == ESMF_GEOMTYPE_GRID) then
-                   call ESMF_FieldWrite(field, trim(stateName)//'_'//trim(prefix)//'_'//trim(fieldNameList(n))//'.nc', variableName=trim(fieldNameList(n)), overwrite=.true., rc=rc)
-                   if (ChkErr(rc,__LINE__,u_FILE_u)) return
-                elseif (geomtype == ESMF_GEOMTYPE_MESH) then
-                   call ESMF_FieldWriteVTK(field, trim(stateName)//'_'//trim(prefix)//'_'//trim(fieldNameList(n)), rc=rc)
-                   if (ChkErr(rc,__LINE__,u_FILE_u)) return
-                else
-                   call ESMF_LogWrite(trim(subname)//": ERROR geomType not supported ", ESMF_LOGMSG_INFO)
-                   rc=ESMF_FAILURE
-                   return
-                end if ! geomType
-             end do
-
-             ! Clear memeory
-             deallocate(fieldNameList)
-          end if
-       end do
-    end if
-
-    ! Clean memory
-    deallocate(itemNameList)
-    deallocate(itemTypeList)
-
-    call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
-
-  end subroutine StateWrite
 
 end module cop_comp_shr

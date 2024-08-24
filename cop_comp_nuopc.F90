@@ -20,12 +20,15 @@ module cop_comp_nuopc
   use ESMF, only: ESMF_GEOMTYPE_GRID, ESMF_GEOMTYPE_MESH
   use ESMF, only: ESMF_FIELDSTATUS_GRIDSET, ESMF_FIELDSTATUS_EMPTY
   use ESMF, only: ESMF_FIELDSTATUS_COMPLETE, ESMF_StateItem_Flag
-  use ESMF, only: ESMF_STATEITEM_STATE, ESMF_LOGMSG_ERROR, ESMF_METHOD_RUN
+  use ESMF, only: ESMF_STATEITEM_STATE, ESMF_STATEITEM_FIELD
+  use ESMF, only: ESMF_LOGMSG_ERROR, ESMF_METHOD_RUN
   use ESMF, only: ESMF_GeomType_Flag, ESMF_FieldStatus_Flag
   use ESMF, only: ESMF_Time, ESMF_TimeGet
   use ESMF, only: ESMF_Clock, ESMF_ClockGet
   use ESMF, only: ESMF_DistGridGet, ESMF_DistGridConnection
-  use ESMF, only: ESMF_StateIsCreated
+  use ESMF, only: ESMF_FieldCreate, ESMF_StateIsCreated
+  use ESMF, only: ESMF_GridGetCoord, ESMF_STAGGERLOC_CORNER
+  use ESMF, only: ESMF_TYPEKIND_R8, ESMF_MESHLOC_ELEMENT
 
   use NUOPC, only: NUOPC_CompDerive
   use NUOPC, only: NUOPC_CompSpecialize
@@ -43,6 +46,7 @@ module cop_comp_nuopc
   use NUOPC_Model, only: model_label_Advance => label_Advance
   use NUOPC_Model, only: label_Advertise
   use NUOPC_Model, only: label_ModifyAdvertised
+  use NUOPC_Model, only: label_AcceptTransfer
   use NUOPC_Model, only: label_RealizeAccepted
   use NUOPC_Model, only: label_Advance
 
@@ -114,6 +118,10 @@ contains
 
     ! It is used to remove some fields from the list of mirrored fields
     call NUOPC_CompSpecialize(gcomp, specLabel=label_ModifyAdvertised, specRoutine=ModifyAdvertised, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    ! It is used to change domain decomposition
+    call NUOPC_CompSpecialize(gcomp, specLabel=label_AcceptTransfer, specRoutine=AcceptTransfer, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     ! It is used to realized mirrored fields and also update decomposition
@@ -427,6 +435,85 @@ contains
 
   !-----------------------------------------------------------------------------
 
+  subroutine AcceptTransfer(gcomp, rc)
+
+    ! input/output variables
+    type(ESMF_GridComp) :: gcomp
+    integer, intent(out) :: rc
+
+    ! local variables
+    integer :: n
+    integer :: itemCount
+    logical :: hasNestedState
+    type(InternalState) :: is_local
+    type(ESMF_State) :: importState
+    character(ESMF_MAXSTR), allocatable     :: itemNameList(:)
+    type(ESMF_StateItem_Flag), allocatable  :: itemTypeList(:)
+    character(len=*), parameter :: subname = trim(modName)//':(AcceptTransfer) '
+    !---------------------------------------------------------------------------
+
+    rc = ESMF_SUCCESS
+    call ESMF_LogWrite(subname//' called', ESMF_LOGMSG_INFO)
+
+    ! Get the internal state
+    nullify(is_local%wrap)
+    call ESMF_GridCompGetInternalState(gcomp, is_local, rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    ! Initialize internal state
+    call InternalStateInit(gcomp, rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    ! Query import state
+    call NUOPC_ModelGet(gcomp, importState=importState, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    ! Query state for nested states
+    call ESMF_StateGet(importState, nestedFlag=.false., itemCount=itemCount, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    ! Check for nested states
+    hasNestedState = .false.
+    if (itemCount > 0) then
+       ! Allocate temporary data structures
+       allocate(itemNameList(itemCount))
+       allocate(itemTypeList(itemCount))
+
+       ! Query state
+       call ESMF_StateGet(importState, nestedFlag=.false., itemNameList=itemNameList, itemTypeList=itemTypeList, rc=rc)
+       if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+       ! Set flag if nested state is found
+       do n = 1, itemCount
+          if (itemTypeList(n) == ESMF_STATEITEM_STATE) hasNestedState = .true.
+       end do
+    end if
+
+    ! Loop over nested states
+    if (hasNestedState) then
+       do n = 1, itemCount
+          if (itemTypeList(n) == ESMF_STATEITEM_STATE) then
+             ! Get the associated nested state
+             call ESMF_StateGet(importState, itemName=itemNameList(n), nestedState=is_local%wrap%NStateImp(n), rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+             ! Replace decomposition
+             call ModifyDecomp(is_local%wrap%NStateImp(n), rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+          end if
+       end do
+    end if
+
+    ! Clean memory
+    if (allocated(itemNameList)) deallocate(itemNameList)
+    if (allocated(itemTypeList)) deallocate(itemTypeList)
+
+    call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
+
+  end subroutine AcceptTransfer
+
+  !-----------------------------------------------------------------------------
+
   subroutine RealizeAccepted(gcomp, rc)
 
     ! input/output variables
@@ -434,90 +521,53 @@ contains
     integer, intent(out) :: rc
 
     ! local variables
-    integer :: i, j
-    integer :: fieldCount, arbDimCount
-    integer :: importItemCount, importNestedItemCount
-    integer :: dimCount, tileCount, connectionCount
-    integer, allocatable :: minIndexPTile(:,:), maxIndexPTile(:,:)
-    logical :: importHasNested
+    integer :: n, m
+    integer :: itemCount
     type(InternalState) :: is_local
-    type(ESMF_Grid) :: newgrid, grid
-    type(ESMF_DistGrid) :: distgrid
-    type(ESMF_Field) :: field
-    type(ESMF_GeomType_Flag) :: geomType
-    type(ESMF_FieldStatus_Flag) :: fieldStatus
-    type(ESMF_State) :: importState, importNestedState
-    type(ESMF_DistGridConnection) , allocatable :: connectionList(:)
-    character(ESMF_MAXSTR), allocatable     :: importItemNameList(:)
-    type(ESMF_StateItem_Flag), allocatable  :: importItemTypeList(:)
-    character(ESMF_MAXSTR), allocatable     :: importNestedItemNameList(:)
-    character(ESMF_MAXSTR), allocatable :: lfieldnamelist(:)
+    character(ESMF_MAXSTR), allocatable     :: itemNameList(:)
+    type(ESMF_StateItem_Flag), allocatable  :: itemTypeList(:)
     character(len=*), parameter :: subname = trim(modName)//':(RealizeAccepted) '
     !---------------------------------------------------------------------------
 
     rc = ESMF_SUCCESS
     call ESMF_LogWrite(subname//' called', ESMF_LOGMSG_INFO)
 
-    !------------------
-    ! Query internal state
-    !------------------
-
+    ! Get the internal state
     nullify(is_local%wrap)
     call ESMF_GridCompGetInternalState(gcomp, is_local, rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    !------------------
-    ! Setup internal state
-    !------------------
-
-    call InternalStateInit(gcomp, rc)
-    if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-    !------------------
-    ! Query for importState
-    !------------------
-
-    call NUOPC_ModelGet(gcomp, importState=importState, rc=rc)
-    if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-    !------------------
-    ! Query state for nestes states 
-    !------------------
-
-    call ESMF_StateGet(importState, nestedFlag=.false., itemCount=importItemCount, rc=rc)
-    if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-    ! Check for nested states
-    importHasNested = .false.
-    if (importItemCount > 0) then
-       ! Allocate temporary data structures
-       allocate(importItemNameList(importItemCount))
-       allocate(importItemTypeList(importItemCount))
-
+    ! Loop over states
+    do n = 1, is_local%wrap%numComp
        ! Query state
-       call ESMF_StateGet(importState, nestedFlag=.false., itemNameList=importItemNameList, itemTypeList=importItemTypeList, rc=rc)
+       call ESMF_StateGet(is_local%wrap%NStateImp(n), itemCount=itemCount, rc=rc)
        if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-       ! Set flag if nested state is found
-       do i = 1, importItemCount
-          if (importItemTypeList(i) == ESMF_STATEITEM_STATE) importHasNested = .true.
-       end do
-    end if
+       ! Allocate temporary data structures
+       allocate(itemNameList(itemCount))
+       allocate(itemTypeList(itemCount))
 
-    ! Loop over nested states if nested state/s is found 
-    if (importHasNested) then
-       do i = 1, importItemCount
-          if (importItemTypeList(i) == ESMF_STATEITEM_STATE) then
-             ! Get the associated nested state
-             call ESMF_StateGet(importState, itemName=importItemNameList(i), nestedState=is_local%wrap%NStateImp(i), rc=rc)
+       ! Query state
+       call ESMF_StateGet(is_local%wrap%NStateImp(n), nestedFlag=.false., itemNameList=itemNameList, itemTypeList=itemTypeList, rc=rc)
+       if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+       ! Loop over fields and realize them
+       do m = 1, itemCount
+          if (itemTypeList(n) == ESMF_STATEITEM_FIELD) then
+             ! Replace grid with mesh
+             call GridToMesh(is_local%wrap%NStateImp(n), rc=rc)
              if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-             ! Replace decomposition
-             call ModifyDecomp(is_local%wrap%NStateImp(i), realize=.true., rc=rc)
+             ! Realize field
+             call NUOPC_Realize(is_local%wrap%NStateImp(n), fieldName=trim(itemNameList(m)), rc=rc)
              if (ChkErr(rc,__LINE__,u_FILE_u)) return
           end if
        end do
-    end if
+
+       ! Clean memory
+       if (allocated(itemNameList)) deallocate(itemNameList)
+       if (allocated(itemTypeList)) deallocate(itemTypeList)
+    end do
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
  
@@ -579,11 +629,100 @@ contains
 
   !-----------------------------------------------------------------------------
 
-  subroutine ModifyDecomp(state, realize, rc)
+  subroutine GridToMesh(state, rc)
+    ! input/output variables
+    type(ESMF_State), intent(inout) :: state
+    integer, intent(out) :: rc
+
+    ! local variables
+    integer :: n
+    integer :: itemCount
+    logical :: isPresent, meshCreated
+    type(ESMF_Field) :: field, meshField
+    type(ESMF_Grid) :: grid
+    type(ESMF_Mesh) :: mesh
+    type(ESMF_FieldStatus_Flag) :: fieldStatus
+    type(ESMF_GeomType_Flag) :: geomtype
+    character(ESMF_MAXSTR), allocatable :: itemNameList(:)
+    character(ESMF_MAXSTR) :: fieldName
+    character(ESMF_MAXSTR) :: message
+    character(len=*), parameter :: subname = trim(modName)//':(GridToMesh) '
+    !---------------------------------------------------------------------------
+
+    rc = ESMF_SUCCESS
+    call ESMF_LogWrite(subname//' called', ESMF_LOGMSG_INFO)
+
+    ! Query state
+    call ESMF_StateGet(state, itemCount=itemCount, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    ! Allocate temporary data structures
+    allocate(itemNameList(itemCount))
+
+    ! Query item name in nested state
+    call ESMF_StateGet(state, itemNameList=itemNameList, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    ! Loop over fields
+    meshCreated = .false.
+    do n = 1, itemCount
+       ! Query state to get field
+       call ESMF_StateGet(state, field=field, itemName=itemNameList(n), rc=rc)
+       if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+       ! Query field for its geom type
+       call ESMF_FieldGet(field, geomtype=geomtype, name=fieldName, rc=rc)
+       if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+       ! Input fields contains grid - need to convert to mesh
+       if (geomtype == ESMF_GEOMTYPE_GRID) then
+          ! Grab grid
+          call ESMF_FieldGet(field, grid=grid, rc=rc)
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+          ! Check corner stagger
+          call ESMF_GridGetCoord(grid, staggerloc=ESMF_STAGGERLOC_CORNER, isPresent=isPresent, rc=rc)
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
+          write(message,'(A,L)') trim(subname)//': has ESMF_STAGGERLOC_CORNER =', isPresent
+          call ESMF_LogWrite(message, ESMF_LOGMSG_INFO)
+
+          ! Convert grid to mesh
+          if (.not. meshCreated) then
+             call ESMF_LogWrite(trim(subname)//": create mesh from grid using "//trim(fieldName), ESMF_LOGMSG_INFO)
+             mesh = ESMF_MeshCreate(grid, rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+             meshCreated = .true.
+          end if
+
+          ! Create field on mesh
+          meshField = ESMF_FieldCreate(mesh, typekind=ESMF_TYPEKIND_R8, meshloc=ESMF_MESHLOC_ELEMENT, name=trim(itemNameList(n)), rc=rc)
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+          ! Swap grid for mesh, at this point, only connected fields are in the state
+          call NUOPC_Realize(state, field=meshField, rc=rc)
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+          ! Check field
+          call ESMF_FieldGet(meshField, status=fieldStatus, rc=rc)
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
+          if (fieldStatus == ESMF_FIELDSTATUS_GRIDSET ) then
+             call ESMF_LogWrite(trim(subname)//": ERROR fieldStatus not complete ", ESMF_LOGMSG_ERROR)
+             rc = ESMF_FAILURE
+             return
+          end if ! fieldStatus
+       end if ! geomType
+    end do ! itemCount
+
+    call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
+
+  end subroutine GridToMesh
+
+  !-----------------------------------------------------------------------------
+
+  subroutine ModifyDecomp(state, rc)
 
     ! input/output variables
     type(ESMF_State), intent(inout) :: state
-    logical, intent(in) :: realize
     integer, intent(out) :: rc
 
     ! local variables
@@ -795,14 +934,6 @@ contains
        end if ! field status
 
     end do ! fields
-
-    ! Realize the advertised field
-    if (realize) then
-       do n = 1, itemCount
-          call NUOPC_Realize(state, fieldName=trim(itemNameList(n)), rc=rc)
-          if (ChkErr(rc,__LINE__,u_FILE_u)) return
-       end do
-    end if
 
     ! Clean memory
     deallocate(itemNameList)
