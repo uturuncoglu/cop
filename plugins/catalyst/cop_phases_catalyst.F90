@@ -4,7 +4,19 @@ module cop_phases_catalyst
   ! Phase for ParaView Catalyst interaction
   !-----------------------------------------------------------------------------
 
-  use ESMF, only: ESMF_GridComp
+  use ESMF , only: operator(==)
+  use ESMF, only: ESMF_GridComp, ESMF_GridCompGetInternalState
+  use ESMF, only: ESMF_Time, ESMF_TimeGet
+  use ESMF, only: ESMF_Clock, ESMF_ClockGet
+  use ESMF, only: ESMF_LogFoundError, ESMF_FAILURE, ESMF_LogWrite
+  use ESMF, only: ESMF_LOGERR_PASSTHRU, ESMF_LOGMSG_ERROR, ESMF_LOGMSG_INFO, ESMF_SUCCESS
+  use ESMF, only: ESMF_GeomType_Flag, ESMF_State, ESMF_StateGet
+  use ESMF, only: ESMF_Field, ESMF_FieldGet, ESMF_FieldWrite, ESMF_FieldWriteVTK
+  use ESMF, only: ESMF_FieldBundle, ESMF_FieldBundleCreate
+  use ESMF, only: ESMF_MAXSTR, ESMF_GEOMTYPE_GRID, ESMF_GEOMTYPE_MESH
+  use ESMF, only: ESMF_StateGet, ESMF_StateItem_Flag, ESMF_STATEITEM_STATE
+
+  use NUOPC_Model, only: NUOPC_ModelGet
 
   use catalyst_api
   use catalyst_conduit

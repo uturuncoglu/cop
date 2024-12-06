@@ -1,4 +1,8 @@
 project(cop_catalyst Fortran)
+if(catalyst_FOUND)
+  include_directories(${catalyst_DIR}/../../../include/catalyst-${catalyst_VERSION})
+  include_directories(${catalyst_DIR}/../../../include/catalyst-${catalyst_VERSION}/conduit)
+endif()
 if(COP_USE_CATALYST)
   set(SRCFILES cop_phases_catalyst.F90)
 else()
