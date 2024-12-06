@@ -28,7 +28,7 @@ module cop_phases_io
   ! Public module routines
   !-----------------------------------------------------------------------------
 
-  public :: cop_phases_dump_all
+  public :: cop_phases_io_run
 
   !-----------------------------------------------------------------------------
   ! Private module routines
@@ -46,7 +46,7 @@ module cop_phases_io
 contains
 !===============================================================================
 
-  subroutine cop_phases_dump_all(gcomp, rc)
+  subroutine cop_phases_io_run(gcomp, rc)
 
     ! input/output variables
     type(ESMF_GridComp)  :: gcomp
@@ -59,7 +59,7 @@ contains
     type(ESMF_Clock) :: clock
     type(ESMF_State) :: importState
     character(len=ESMF_MAXSTR) :: timeStr
-    character(len=*), parameter :: subname = trim(modName)//':(cop_phases_dump_all) '
+    character(len=*), parameter :: subname = trim(modName)//':(cop_phases_io_run) '
     !---------------------------------------------------------------------------
 
     rc = ESMF_SUCCESS
@@ -90,7 +90,7 @@ contains
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
-  end subroutine
+  end subroutine cop_phases_io_run
 
   !-----------------------------------------------------------------------------
 

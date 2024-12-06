@@ -1,5 +1,7 @@
 project(cop_io Fortran)
-set(SRCFILES cop_phases_io.F90)
+set(SRCFILES cop_phases_io.F90
+             ../../cop_comp_internalstate.F90
+             ../../cop_comp_shr.F90)
 add_library(cop_io ${SRCFILES})
 install(TARGETS cop_io
         EXPORT  cop_io

@@ -57,8 +57,9 @@ module cop_comp_nuopc
   
   use cop_comp_internalstate, only: InternalState
   use cop_comp_internalstate, only: InternalStateInit 
-  use cop_phases_io, only: cop_phases_dump_all
-  !use cop_phases_catalyst, only: cop_phases_catalyst_run
+  use cop_phases_io, only: cop_phases_io_run
+  use cop_phases_python, only: cop_phases_python_run
+  use cop_phases_catalyst, only: cop_phases_catalyst_run
 
   implicit none
   private
@@ -140,16 +141,22 @@ contains
     ! setup custom phases
     !------------------
 
-    call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_RUN, phaseLabelList=(/ 'cop_phases_dump_all' /), userRoutine=model_routine_Run, rc=rc)
+    ! I/O phase
+    call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_RUN, phaseLabelList=(/ 'cop_phases_io' /), userRoutine=model_routine_Run, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, specPhaseLabel="cop_phases_dump_all", specRoutine=cop_phases_dump_all, rc=rc)
+    call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, specPhaseLabel="cop_phases_io", specRoutine=cop_phases_io_run, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    !call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_RUN, phaseLabelList=(/"cop_phases_catalyst_run"/), &
-    !   userRoutine=model_routine_Run, rc=rc)
-    !if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    !call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, &
-    !   specPhaseLabel="cop_phases_catalyst_run", specRoutine=cop_phases_catalyst_run, rc=rc)
+    ! Python phase
+    call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_RUN, phaseLabelList=(/ 'cop_phases_python' /), userRoutine=model_routine_Run, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, specPhaseLabel="cop_phases_python", specRoutine=cop_phases_python_run, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    ! ParaView Catalyst phase
+    call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_RUN, phaseLabelList=(/"cop_phases_catalyst"/), userRoutine=model_routine_Run, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, specPhaseLabel="cop_phases_catalyst", specRoutine=cop_phases_catalyst_run, rc=rc)
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
@@ -346,88 +353,81 @@ contains
     call ESMF_StateGet(importState, nestedFlag=.false., itemCount=importItemCount, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    ! Check for nested states
-    importHasNested = .false.
-    if (importItemCount > 0) then
-       ! Allocate temporary data structures
-       allocate(importItemNameList(importItemCount))
-       allocate(importItemTypeList(importItemCount))
+    ! Allocate temporary data structures
+    allocate(importItemNameList(importItemCount))
+    allocate(importItemTypeList(importItemCount))
 
-       ! Query state
-       call ESMF_StateGet(importState, nestedFlag=.false., itemNameList=importItemNameList, itemTypeList=importItemTypeList, rc=rc)
-       if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-       ! Set flag if nested state is found
-       do i = 1, importItemCount
-          if (importItemTypeList(i) == ESMF_STATEITEM_STATE) importHasNested = .true.
-       end do
-    end if
+    ! Query state
+    call ESMF_StateGet(importState, nestedFlag=.false., itemNameList=importItemNameList, itemTypeList=importItemTypeList, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     ! Loop over nested states if they are found and filter fields 
-    if (importHasNested) then
-       do i = 1, importItemCount
-          if (importItemTypeList(i) == ESMF_STATEITEM_STATE) then
-             ! Get the associated nested state
-             call ESMF_StateGet(importState, itemName=importItemNameList(i), nestedState=importNestedState, rc=rc)
-             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    do i = 1, importItemCount
+       if (importItemTypeList(i) == ESMF_STATEITEM_STATE) then
+          ! Get the associated nested state
+          call ESMF_StateGet(importState, itemName=importItemNameList(i), nestedState=importNestedState, rc=rc)
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-             ! Query nested state
-             call ESMF_StateGet(importNestedState, name=StateName, itemCount=importNestedItemCount, rc=rc)
-             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+          ! Query nested state
+          call ESMF_StateGet(importNestedState, name=StateName, itemCount=importNestedItemCount, rc=rc)
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-             ! Allocate temporary data structures
-             allocate(importNestedItemNameList(importNestedItemCount))
-             allocate(importNestedItemTypeList(importNestedItemCount))
+          ! Allocate temporary data structures
+          allocate(importNestedItemNameList(importNestedItemCount))
+          allocate(importNestedItemTypeList(importNestedItemCount))
 
-             ! Query item name and types in the nested state
-             call ESMF_StateGet(importNestedState, itemNameList=importNestedItemNameList, &
-                itemTypeList=importNestedItemTypeList, rc=rc)
-             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+          ! Query item name and types in the nested state
+          call ESMF_StateGet(importNestedState, itemNameList=importNestedItemNameList, &
+             itemTypeList=importNestedItemTypeList, rc=rc)
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-             ! Print debug information
-             write(message, fmt='(A,I5,A)') trim(subname)//': nested import state '//trim(StateName)//' has ', importNestedItemCount, ' item'
-             call ESMF_LogWrite(trim(message), ESMF_LOGMSG_INFO)
+          ! Print debug information
+          write(message, fmt='(A,I5,A)') trim(subname)//': nested import state '//trim(StateName)//' has ', importNestedItemCount, ' item'
+          call ESMF_LogWrite(trim(message), ESMF_LOGMSG_INFO)
 
-             ! Keep only desired fields
-             if (size(fieldNamesToKeep, dim=1) > 0) then
-                do j = 1, importNestedItemCount 
-                   call ESMF_LogWrite(trim(subname)//': '//trim(importNestedItemNameList(j)), ESMF_LOGMSG_INFO)
+          ! Keep only desired fields
+          if (size(fieldNamesToKeep, dim=1) > 0) then
+             do j = 1, importNestedItemCount
+                call ESMF_LogWrite(trim(subname)//': '//trim(importNestedItemNameList(j)), ESMF_LOGMSG_INFO)
 
-                   ! Check field is in the keep list
-                   isFound = .false.
-                   do k = 1, size(fieldNamesToKeep, dim=1)
-                      if (trim(importNestedItemNameList(j)) == trim(fieldNamesToKeep(k))) then
-                         isFound = .true.
-                         cycle
-                      end if
-                   end do
-
-                   ! Remove field from import state if it is not specified in the keep list
-                   if (.not. isFound) then
-                      call ESMF_LogWrite(trim(subname)//': '//trim(importNestedItemNameList(j))//' will be removed', ESMF_LOGMSG_INFO)
-                      call ESMF_StateRemove(importNestedState, itemNameList=(/trim(importNestedItemNameList(j))/), relaxedFlag=.true., rc=rc)
-                      if (ChkErr(rc,__LINE__,u_FILE_u)) return
+                ! Check field is in the keep list
+                isFound = .false.
+                do k = 1, size(fieldNamesToKeep, dim=1)
+                   if (trim(importNestedItemNameList(j)) == trim(fieldNamesToKeep(k))) then
+                      isFound = .true.
                       cycle
                    end if
                 end do
-             end if
 
-             if (size(fieldNamesToRemove, dim=1) > 0) then
-                ! Print out field names that will be removed
-                do j = 1, size(fieldNamesToRemove, dim=1)
-                   call ESMF_LogWrite(trim(subname)//': '//trim(fieldNamesToRemove(j))//' will be removed', ESMF_LOGMSG_INFO)
-                end do
-                ! Remove field/s from state
-                call ESMF_StateRemove(importNestedState, itemNameList=fieldNamesToRemove, relaxedFlag=.true., rc=rc)
-                if (ChkErr(rc,__LINE__,u_FILE_u)) return
-             end if
-
-             ! Deallocate temporary data structures
-             deallocate(importNestedItemNameList)
-             deallocate(importNestedItemTypeList)
+                ! Remove field from import state if it is not specified in the keep list
+                if (.not. isFound) then
+                   call ESMF_LogWrite(trim(subname)//': '//trim(importNestedItemNameList(j))//' will be removed', ESMF_LOGMSG_INFO)
+                   call ESMF_StateRemove(importNestedState, itemNameList=(/trim(importNestedItemNameList(j))/), relaxedFlag=.true., rc=rc)
+                   if (ChkErr(rc,__LINE__,u_FILE_u)) return
+                   cycle
+                end if
+             end do
           end if
-       end do
-    end if
+
+          if (size(fieldNamesToRemove, dim=1) > 0) then
+             ! Print out field names that will be removed
+             do j = 1, size(fieldNamesToRemove, dim=1)
+                call ESMF_LogWrite(trim(subname)//': '//trim(fieldNamesToRemove(j))//' will be removed', ESMF_LOGMSG_INFO)
+             end do
+             ! Remove field/s from state
+             call ESMF_StateRemove(importNestedState, itemNameList=fieldNamesToRemove, relaxedFlag=.true., rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+          end if
+
+          ! Clean memory
+          deallocate(importNestedItemNameList)
+          deallocate(importNestedItemTypeList)
+       end if
+    end do
+
+    ! Clean memory
+    deallocate(importItemNameList)
+    deallocate(importItemTypeList)
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
     

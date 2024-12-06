@@ -1,7 +1,8 @@
 project(cop_catalyst Fortran)
-set(SRCFILES cop_phases_catalyst.F90)
 if(COP_USE_CATALYST)
-  add_definitions(-DUSE_CATALYST)
+  set(SRCFILES cop_phases_catalyst.F90)
+else()
+  set(SRCFILES cop_phases_catalyst_void.F90)
 endif()
 add_library(cop_catalyst ${SRCFILES})
 install(TARGETS cop_catalyst
