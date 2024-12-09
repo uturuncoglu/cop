@@ -16,6 +16,7 @@ module cop_phases_catalyst
   use ESMF, only: ESMF_MAXSTR, ESMF_GEOMTYPE_GRID, ESMF_GEOMTYPE_MESH
   use ESMF, only: ESMF_StateGet, ESMF_StateItem_Flag, ESMF_STATEITEM_STATE
 
+  use NUOPC, only: NUOPC_CompAttributeGet
   use NUOPC_Model, only: NUOPC_ModelGet
 
   use catalyst_api
@@ -25,6 +26,8 @@ module cop_phases_catalyst
 
   use cop_comp_shr, only: ChkErr
   use cop_comp_internalstate, only: InternalState
+
+  use, intrinsic :: iso_c_binding, only: C_PTR
 
   implicit none
   private
@@ -57,11 +60,15 @@ contains
     integer, intent(out) :: rc
 
     ! local variables
-    integer :: n
+    type(C_PTR) node
+    integer :: n, numScripts
+    logical :: isPresent, isSet
+    logical, save :: first_time = .true.
     type(InternalState) :: is_local
     type(ESMF_Time) :: currTime
     type(ESMF_Clock) :: clock
     type(ESMF_State) :: importState
+    character(ESMF_MAXSTR) :: cvalue, tmpStr, scriptName
     character(len=ESMF_MAXSTR) :: timeStr
     character(len=*), parameter :: subname = trim(modName)//':(cop_phases_catalyst_run) '
     !---------------------------------------------------------------------------
@@ -86,9 +93,38 @@ contains
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     ! Loop over states
-    do n = 1, is_local%wrap%numComp
-       call ESMF_LogWrite(subname//' '//trim(is_local%wrap%compName(n))//'_import_'//trim(timeStr), ESMF_LOGMSG_INFO)
-    end do
+    !do n = 1, is_local%wrap%numComp
+    !   call ESMF_LogWrite(subname//' '//trim(is_local%wrap%compName(n))//'_import_'//trim(timeStr), ESMF_LOGMSG_INFO)
+    !end do
+
+    ! Initialize Catalyst
+    if (first_time) then
+       ! This node will hold the information nessesary to initialize ParaViewCatalyst
+       node = catalyst_conduit_node_create()
+
+       ! Query name of Catalyst script
+       call NUOPC_CompAttributeGet(gcomp, name="CatalystScript", value=cvalue, &
+         isPresent=isPresent, isSet=isSet, rc=rc)
+       if (ChkErr(rc,__LINE__,u_FILE_u)) return
+       if (isPresent .and. isSet) then
+          scriptName = trim(cvalue)
+          call ESMF_LogWrite(trim(subname)//": CatalystScript = "//trim(scriptName), ESMF_LOGMSG_INFO)
+       endif
+
+       ! Set script name
+       ! TODO: Hard coded to be only one but this could be extended later
+       numScripts = 1
+       write(tmpStr, '(A,I1)') 'catalyst/scripts/script', numScripts
+       do n = 1, numScripts
+          call catalyst_conduit_node_set_path_char8_str(node, trim(tmpStr)//"/filename", trim(scriptName))
+       end do
+
+       ! Print out node for debugging
+       call catalyst_conduit_node_print_detailed(node)
+
+       ! Set flag
+       first_time = .false.
+    end if
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 

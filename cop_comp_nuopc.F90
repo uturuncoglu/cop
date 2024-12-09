@@ -553,7 +553,7 @@ contains
 
        ! Loop over fields and realize them
        do m = 1, itemCount
-          if (itemTypeList(n) == ESMF_STATEITEM_FIELD) then
+          if (itemTypeList(m) == ESMF_STATEITEM_FIELD) then
              ! Replace grid with mesh
              call GridToMesh(is_local%wrap%NStateImp(n), rc=rc)
              if (ChkErr(rc,__LINE__,u_FILE_u)) return
