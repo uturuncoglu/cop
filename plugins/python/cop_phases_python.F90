@@ -15,6 +15,8 @@ module cop_phases_python
   use ESMF, only: ESMF_FieldBundle, ESMF_FieldBundleCreate
   use ESMF, only: ESMF_MAXSTR, ESMF_GEOMTYPE_GRID, ESMF_GEOMTYPE_MESH
   use ESMF, only: ESMF_StateGet, ESMF_StateItem_Flag, ESMF_STATEITEM_STATE
+  use ESMF, only: ESMF_Mesh, ESMF_MeshGet, ESMF_STATEITEM_FIELD
+  use ESMF, only: ESMF_KIND_R8
 
   use NUOPC_Model, only: NUOPC_ModelGet
 
@@ -106,6 +108,15 @@ contains
 
     ! local variables
     type(C_PTR) :: cnode
+    type(ESMF_Mesh) :: mesh
+    type(ESMF_Field) :: field
+    integer :: n, m, itemCount
+    integer :: spatialDim, numOwnedElements
+    logical, save :: firstTime = .true.
+    real(ESMF_KIND_R8), allocatable :: ownedElemCoords(:)
+    real(ESMF_KIND_R8), pointer :: lats(:), lons(:)
+    character(ESMF_MAXSTR), allocatable     :: itemNameList(:)
+    type(ESMF_StateItem_Flag), allocatable  :: itemTypeList(:)
     character(len=*), parameter :: subname = trim(modName)//':(FieldToNode) '
     !---------------------------------------------------------------------------
 
@@ -115,9 +126,69 @@ contains
     ! Create conduit node
     cnode = conduit_node_create()
 
+    ! Query state
+    call ESMF_StateGet(state, itemCount=itemCount, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    if (itemCount > 0) then
+       ! Allocate temporary arrays
+       allocate(itemNameList(itemCount))
+       allocate(itemTypeList(itemCount))
+
+       ! Query item names and types
+       call ESMF_StateGet(state, itemNameList=itemNameList, itemTypeList=itemTypeList, rc=rc)
+       if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+       ! Loop over items
+       do n = 1, itemCount
+          ! Check if item is field
+          if (itemTypeList(n) == ESMF_STATEITEM_FIELD) then
+             ! Query field
+             call ESMF_StateGet(state, itemName=itemNameList(n), field=field, rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+             ! Extract mesh information and add it to the node
+             ! This assumes all fields are on same mesh
+             if (firstTime) then
+                ! Query mesh
+                call ESMF_FieldGet(field, mesh=mesh, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                ! Extract coordinate information
+                call ESMF_MeshGet(mesh, spatialDim=spatialDim, numOwnedElements=numOwnedElements, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                allocate(lats(numOwnedElements))
+                allocate(lons(numOwnedElements))
+                allocate(ownedElemCoords(spatialDim*numOwnedElements))
+                
+                call ESMF_MeshGet(mesh, ownedElemCoords=ownedElemCoords, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                do m = 1, numOwnedElements
+                   lons(m) = ownedElemCoords(2*m-1)
+                   lats(m) = ownedElemCoords(2*m)
+                end do
+
+                ! Clean memory
+                deallocate(ownedElemCoords)
+
+                ! Set nodes
+                call conduit_node_set_path_float64_ptr(cnode, trim(compName)//'_lon', lons, int8(numOwnedElements))
+                call conduit_node_set_path_float64_ptr(cnode, trim(compName)//'_lat', lats, int8(numOwnedElements))
+
+
+                ! Print node for debugging purpose
+                call conduit_node_save(cnode, trim(compName)//'_node.json', 'json')
+
+                firstTime = .false.
+             end if ! firstTime
+          end if ! itemTypeList  
+       end do
+    end if ! itemCount
     ! Pass node to Python
-    call conduit_fort_to_py(cnode)
-    call conduit_node_print(cnode)
+    !call conduit_fort_to_py(cnode)
+    !call conduit_node_print(cnode)
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 

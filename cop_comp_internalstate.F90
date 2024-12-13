@@ -8,10 +8,11 @@ module cop_comp_internalstate
   use ESMF, only: ESMF_GridComp, ESMF_GridCompGetInternalState
   use ESMF, only: ESMF_State, ESMF_StateGet, ESMF_StateItem_Flag
   use ESMF, only: ESMF_FieldBundle
-  use ESMF, only: ESMF_LogWrite
+  use ESMF, only: ESMF_UtilStringLowerCase, ESMF_LogWrite
   use ESMF, only: ESMF_SUCCESS, ESMF_LOGMSG_INFO
   use ESMF, only: ESMF_STATEITEM_STATE, ESMF_MAXSTR
 
+  use NUOPC, only: NUOPC_GetAttribute
   use NUOPC_Model, only: NUOPC_ModelGet
 
   use cop_comp_shr, only: ChkErr
@@ -63,9 +64,11 @@ module cop_comp_internalstate
     integer :: importItemCount, nestedStateCount
     type(InternalState) :: is_local
     type(ESMF_State) :: importState
+    type(ESMF_State) :: importNestedState
     character(ESMF_MAXSTR), allocatable     :: importItemNameList(:)
     type(ESMF_StateItem_Flag), allocatable  :: importItemTypeList(:)    
     character(ESMF_MAXSTR) :: message
+    character(ESMF_MAXSTR) :: namespace
     character(len=*), parameter :: subname = trim(modName)//':(InternalStateInit) '
     !---------------------------------------------------------------------------
 
@@ -100,6 +103,7 @@ module cop_comp_internalstate
        call ESMF_StateGet(importState, nestedFlag=.false., itemNameList=importItemNameList, itemTypeList=importItemTypeList, rc=rc)
        if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
+
        ! Set flag if nested state is found
        do i = 1, importItemCount
           if (importItemTypeList(i) == ESMF_STATEITEM_STATE) then
@@ -129,11 +133,22 @@ module cop_comp_internalstate
     !------------------
 
     if (nestedStateCount > 0) then
-       j = 0
+       j = 1
        do i = 1, importItemCount
           if (importItemTypeList(i) == ESMF_STATEITEM_STATE) then
+             ! Get the associated nested state
+             call ESMF_StateGet(importState, itemName=importItemNameList(i), nestedState=importNestedState, rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+             ! Query namespace
+             call NUOPC_GetAttribute(importNestedState, name="Namespace", value=namespace, rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+             namespace = ESMF_UtilStringLowerCase(trim(namespace))
+
+             ! Set provider component name
+             is_local%wrap%compName(j) = trim(namespace)
+             call ESMF_LogWrite(trim(subname)//': Provider component '//trim(is_local%wrap%compName(j))//' is added.', ESMF_LOGMSG_INFO)
              j = j+1
-             is_local%wrap%compName(j) = trim(importItemNameList(i))
           end if
        end do
     end if

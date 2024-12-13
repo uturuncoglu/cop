@@ -1,6 +1,8 @@
 project(cop_python Fortran)
 if(COP_USE_PYTHON)
-  set(SRCFILES cop_phases_python.F90)
+  set(SRCFILES cop_phases_python.F90
+	       ../../cop_comp_internalstate.F90
+               ../../cop_comp_shr.F90)
 else()
   set(SRCFILES cop_phases_python_void.F90)
 endif()

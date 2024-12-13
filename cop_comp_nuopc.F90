@@ -24,7 +24,7 @@ module cop_comp_nuopc
   use ESMF, only: ESMF_LOGMSG_ERROR, ESMF_METHOD_RUN
   use ESMF, only: ESMF_GeomType_Flag, ESMF_FieldStatus_Flag
   use ESMF, only: ESMF_Time, ESMF_TimeGet
-  use ESMF, only: ESMF_Clock, ESMF_ClockGet
+  use ESMF, only: ESMF_Clock, ESMF_ClockGet, ESMF_UtilStringLowerCase
   use ESMF, only: ESMF_DistGridGet, ESMF_DistGridConnection
   use ESMF, only: ESMF_FieldCreate, ESMF_StateIsCreated
   use ESMF, only: ESMF_GridGetCoord, ESMF_STAGGERLOC_CORNER
@@ -205,7 +205,7 @@ contains
     ! It indicates that fields should be mirrored in the State of a connected component
     !------------------
 
-    call NUOPC_SetAttribute(importState, "FieldTransferPolicy", "transferAllAsNests", rc=rc)
+    call NUOPC_SetAttribute(importState, "FieldTransferPolicy", "transferAllWithNamespace", rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
@@ -233,9 +233,8 @@ contains
     character(ESMF_MAXSTR), allocatable :: fieldNamesToKeep(:)
     character(ESMF_MAXSTR), allocatable :: lfieldnamelist(:)
     character(ESMF_MAXSTR), allocatable :: fieldNamesToRemove(:)
-    character(ESMF_MAXSTR) :: stateName 
+    character(ESMF_MAXSTR) :: namespace
     character(ESMF_MAXSTR) :: message, cname, cvalue, scalar_field_name = ''
-    logical :: importHasNested
     character(ESMF_MAXSTR), allocatable     :: importItemNameList(:)
     type(ESMF_StateItem_Flag), allocatable  :: importItemTypeList(:)
     character(ESMF_MAXSTR), allocatable     :: importNestedItemNameList(:)
@@ -369,7 +368,7 @@ contains
           if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
           ! Query nested state
-          call ESMF_StateGet(importNestedState, name=StateName, itemCount=importNestedItemCount, rc=rc)
+          call ESMF_StateGet(importNestedState, itemCount=importNestedItemCount, rc=rc)
           if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
           ! Allocate temporary data structures
@@ -381,8 +380,13 @@ contains
              itemTypeList=importNestedItemTypeList, rc=rc)
           if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
+          ! Query namespace
+          call NUOPC_GetAttribute(importNestedState, name="Namespace", value=namespace, rc=rc)
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
+          namespace = ESMF_UtilStringLowerCase(trim(namespace))
+
           ! Print debug information
-          write(message, fmt='(A,I5,A)') trim(subname)//': nested import state '//trim(StateName)//' has ', importNestedItemCount, ' item'
+          write(message, fmt='(A,I5,A)') trim(subname)//': nested import state from '//trim(namespace)//' has ', importNestedItemCount, ' item'
           call ESMF_LogWrite(trim(message), ESMF_LOGMSG_INFO)
 
           ! Keep only desired fields
