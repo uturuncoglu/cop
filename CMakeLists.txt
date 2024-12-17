@@ -30,7 +30,23 @@ if(COP_USE_CATALYST)
 endif()
 
 if(COP_USE_PYTHON)
+  # Find Conduit
   find_package(Conduit REQUIRED)
+  # Find Python
+  set(Python_FIND_STRATEGY "LOCATION")
+  find_package(Python COMPONENTS Interpreter Development)
+  set(PYTHON_EXECUTABLE "${Python_EXECUTABLE}")
+  # Setup Python
+  include(plugins/python/SetupPython.cmake)
+  # Conduit requires c++14 support
+  set(CMAKE_CXX_STANDARD 14)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+  message("Python_INCLUDE_DIRS  = ${Python_INCLUDE_DIRS}")
+  message("Python_EXECUTABLE    = ${Python_EXECUTABLE}")
+  message("Python_EXECUTABLE    = ${PYTHON_EXECUTABLE}")
+  message("Python_LIBRARY_DIRS  = ${Python_LIBRARY_DIRS}")
+  message("PYTHON_CONFIG_LIBDIR = ${PYTHON_CONFIG_LIBDIR}")
 endif()
 
 ###############################################################################
@@ -74,7 +90,15 @@ add_subdirectory(plugins/python)
 add_dependencies(cop cop_python)
 target_link_libraries(cop PRIVATE cop_python)
 if(COP_USE_PYTHON)
+  target_include_directories(cop PUBLIC ${PYTHON_INCLUDE_DIR})
   target_link_libraries(cop PRIVATE conduit::conduit conduit::conduit_python conduit::conduit_mpi)
+  target_link_libraries(cop PRIVATE ${PYTHON_LIBRARY})
+  find_library(UTIL_LIB util)
+  find_library(C_LIB c)
+  message("UTIL_LIB = ${UTIL_LIB}")
+  message("C_LIB = ${C_LIB}")
+  target_link_libraries(cop PRIVATE ${UTIL_LIB})
+  target_link_libraries(cop PRIVATE ${C_LIB})
 endif()
 
 ###############################################################################

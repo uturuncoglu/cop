@@ -20,7 +20,7 @@ module cop_phases_python
 
   use NUOPC_Model, only: NUOPC_ModelGet
 
-  use iso_c_binding
+  use, intrinsic :: iso_c_binding, only : C_PTR
   use conduit
 
   use cop_comp_shr, only: ChkErr
@@ -38,6 +38,14 @@ module cop_phases_python
   !-----------------------------------------------------------------------------
   ! Private module routines
   !-----------------------------------------------------------------------------
+
+  interface
+    subroutine conduit_fort_to_py(cnode) bind(C, name="conduit_fort_to_py")
+      use iso_c_binding
+      implicit none
+      type(C_PTR), value, intent(in) :: cnode
+    end subroutine conduit_fort_to_py
+  end interface
 
   !-----------------------------------------------------------------------------
   ! Private module data
@@ -89,7 +97,8 @@ contains
     ! Loop over states
     do n = 1, is_local%wrap%numComp
        ! Pass state to conduit
-       call StateToNode(is_local%wrap%NStateImp(n), trim(is_local%wrap%compName(n))//'_import_'//trim(timeStr), rc=rc)
+       !call StateToNode(is_local%wrap%NStateImp(n), trim(is_local%wrap%compName(n))//'_import_'//trim(timeStr), rc=rc)
+       call StateToNode(is_local%wrap%NStateImp(n), trim(is_local%wrap%compName(n)), rc=rc)
        if (ChkErr(rc,__LINE__,u_FILE_u)) return
     end do
 
@@ -100,6 +109,8 @@ contains
   !-----------------------------------------------------------------------------
 
   subroutine StateToNode(state, compName, rc)
+    use iso_c_binding
+    implicit none
 
     ! input/output variables
     type(ESMF_State) :: state 
@@ -177,7 +188,6 @@ contains
                 call conduit_node_set_path_float64_ptr(cnode, trim(compName)//'_lon', lons, int8(numOwnedElements))
                 call conduit_node_set_path_float64_ptr(cnode, trim(compName)//'_lat', lats, int8(numOwnedElements))
 
-
                 ! Print node for debugging purpose
                 call conduit_node_save(cnode, trim(compName)//'_node.json', 'json')
 
@@ -186,9 +196,9 @@ contains
           end if ! itemTypeList  
        end do
     end if ! itemCount
+
     ! Pass node to Python
-    !call conduit_fort_to_py(cnode)
-    !call conduit_node_print(cnode)
+    call conduit_fort_to_py(cnode)
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
