@@ -4,9 +4,10 @@ module cop_phases_catalyst
   ! Phase for ParaView Catalyst interaction
   !-----------------------------------------------------------------------------
 
-  use ESMF , only: operator(==)
+  use ESMF, only: operator(==), operator(-), operator(/)
   use ESMF, only: ESMF_GridComp, ESMF_GridCompGetInternalState
   use ESMF, only: ESMF_Time, ESMF_TimeGet
+  use ESMF, only: ESMF_TimeInterval, ESMF_TimeIntervalGet
   use ESMF, only: ESMF_Clock, ESMF_ClockGet
   use ESMF, only: ESMF_LogFoundError, ESMF_FAILURE, ESMF_LogWrite
   use ESMF, only: ESMF_LOGERR_PASSTHRU, ESMF_LOGMSG_ERROR, ESMF_LOGMSG_INFO, ESMF_SUCCESS
@@ -60,12 +61,15 @@ contains
     integer, intent(out) :: rc
 
     ! local variables
-    type(C_PTR) node
-    integer :: n, numScripts
+    type(C_PTR) :: node
+    type(C_PTR) :: channel
+    integer :: n, numScripts, step
+    real(kind=8) :: time
     logical :: isPresent, isSet
     logical, save :: first_time = .true.
     type(InternalState) :: is_local
-    type(ESMF_Time) :: currTime
+    type(ESMF_TimeInterval) :: timeStep
+    type(ESMF_Time) :: startTime, currTime
     type(ESMF_Clock) :: clock
     type(ESMF_State) :: importState
     character(ESMF_MAXSTR) :: cvalue, tmpStr, scriptName
@@ -86,16 +90,14 @@ contains
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     ! Query current time
-    call ESMF_ClockGet(clock, currTime=currTime, rc=rc)
+    call ESMF_ClockGet(clock, startTime=startTime, currTime=currTime, timeStep=timeStep, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     call ESMF_TimeGet(currTime, timeStringISOFrac=timeStr , rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    ! Loop over states
-    !do n = 1, is_local%wrap%numComp
-    !   call ESMF_LogWrite(subname//' '//trim(is_local%wrap%compName(n))//'_import_'//trim(timeStr), ESMF_LOGMSG_INFO)
-    !end do
+    call ESMF_TimeIntervalGet(currTime-startTime, s_r8=time, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     ! Initialize Catalyst
     if (first_time) then
@@ -125,6 +127,16 @@ contains
        ! Set flag
        first_time = .false.
     end if
+
+    ! Add time/cycle information - Catalyst-specific variables
+    step = int((currTime-startTime)/timeStep)
+    call catalyst_conduit_node_set_path_int32(node, "catalyst/state/timestep", step)
+    call catalyst_conduit_node_set_path_float64(node, "catalyst/state/time", time)
+
+    ! Add channel
+    channel = catalyst_conduit_node_fetch(node, "catalyst/channels/grid")
+
+
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 

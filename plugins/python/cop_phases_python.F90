@@ -5,8 +5,8 @@ module cop_phases_python
   !-----------------------------------------------------------------------------
 
   use ESMF , only: operator(==)
-  use ESMF, only: ESMF_GridComp, ESMF_GridCompGetInternalState
-  use ESMF, only: ESMF_Time, ESMF_TimeGet
+  use ESMF, only: ESMF_GridComp, ESMF_GridCompGet, ESMF_GridCompGetInternalState
+  use ESMF, only: ESMF_VM, ESMF_VMGet, ESMF_Time, ESMF_TimeGet
   use ESMF, only: ESMF_Clock, ESMF_ClockGet
   use ESMF, only: ESMF_LogFoundError, ESMF_FAILURE, ESMF_LogWrite
   use ESMF, only: ESMF_LOGERR_PASSTHRU, ESMF_LOGMSG_ERROR, ESMF_LOGMSG_INFO, ESMF_SUCCESS
@@ -18,6 +18,7 @@ module cop_phases_python
   use ESMF, only: ESMF_Mesh, ESMF_MeshGet, ESMF_STATEITEM_FIELD
   use ESMF, only: ESMF_KIND_R8
 
+  use NUOPC, only: NUOPC_CompAttributeGet
   use NUOPC_Model, only: NUOPC_ModelGet
 
   use, intrinsic :: iso_c_binding, only : C_PTR
@@ -25,6 +26,7 @@ module cop_phases_python
 
   use cop_comp_shr, only: ChkErr
   use cop_comp_internalstate, only: InternalState
+  use cop_python_interface, only: conduit_fort_to_py
 
   implicit none
   private
@@ -39,19 +41,11 @@ module cop_phases_python
   ! Private module routines
   !-----------------------------------------------------------------------------
 
-  interface
-    subroutine conduit_fort_to_py(cnode) bind(C, name="conduit_fort_to_py")
-      use iso_c_binding
-      implicit none
-      type(C_PTR), value, intent(in) :: cnode
-    end subroutine conduit_fort_to_py
-  end interface
-
   !-----------------------------------------------------------------------------
   ! Private module data
   !-----------------------------------------------------------------------------
 
-  integer :: dbug = 0
+  type(C_PTR) :: cnode
   character(len=*), parameter :: modName = "(cop_phases_python)"
   character(len=*), parameter :: u_FILE_u = __FILE__
 
@@ -66,12 +60,16 @@ contains
     integer, intent(out) :: rc
 
     ! local variables
-    integer :: n
+    integer :: n, mpiComm, localPet, petCount
     type(InternalState) :: is_local
+    type(ESMF_VM) :: vm
     type(ESMF_Time) :: currTime
     type(ESMF_Clock) :: clock
     type(ESMF_State) :: importState
+    logical :: isPresent, isSet
     character(len=ESMF_MAXSTR) :: timeStr
+    character(ESMF_MAXSTR) :: cvalue
+    character(ESMF_MAXSTR) :: scriptName
     character(len=*), parameter :: subname = trim(modName)//':(cop_phases_python_run) '
     !---------------------------------------------------------------------------
 
@@ -83,8 +81,15 @@ contains
     call ESMF_GridCompGetInternalState(gcomp, is_local, rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    ! Query component clock
+    ! Query component
     call NUOPC_ModelGet(gcomp, modelClock=clock, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    call ESMF_GridCompGet(gcomp, vm=vm, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    ! Query VM
+    call ESMF_VMGet(vm, mpiCommunicator=mpiComm, localPet=localPet, petCount=petCount, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     ! Query current time
@@ -94,13 +99,36 @@ contains
     call ESMF_TimeGet(currTime, timeStringISOFrac=timeStr , rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
+    ! Query name of Python script
+    call NUOPC_CompAttributeGet(gcomp, name="PythonScript", value=cvalue, &
+      isPresent=isPresent, isSet=isSet, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    if (isPresent .and. isSet) then
+       scriptName = trim(cvalue)
+       call ESMF_LogWrite(trim(subname)//": PythonScript = "//trim(scriptName), ESMF_LOGMSG_INFO)
+    endif
+
+    ! Create Conduit node
+    cnode = conduit_node_create()
+
+    ! Add information related to MPI
+    call conduit_node_set_path_int32(cnode, "par/comm", mpiComm)
+    call conduit_node_set_path_int32(cnode, "par/lpet", localPet)
+    call conduit_node_set_path_int32(cnode, "par/npet", petCount)
+
     ! Loop over states
     do n = 1, is_local%wrap%numComp
-       ! Pass state to conduit
-       !call StateToNode(is_local%wrap%NStateImp(n), trim(is_local%wrap%compName(n))//'_import_'//trim(timeStr), rc=rc)
+       ! Add content of state to Conduit node
        call StateToNode(is_local%wrap%NStateImp(n), trim(is_local%wrap%compName(n)), rc=rc)
        if (ChkErr(rc,__LINE__,u_FILE_u)) return
     end do
+
+    ! Print node for debugging purpose
+    !write(cvalue, fmt="(A,I5.5,A)") 'cop_node_', localPet, '.json'
+    !call conduit_node_save(cnode, trim(cvalue), 'json')
+
+    ! Pass node to Python
+    call conduit_fort_to_py(cnode, trim(scriptName)//char(0))
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
@@ -118,24 +146,22 @@ contains
     integer, intent(out), optional :: rc
 
     ! local variables
-    type(C_PTR) :: cnode
     type(ESMF_Mesh) :: mesh
     type(ESMF_Field) :: field
-    integer :: n, m, itemCount
+    integer :: n, m, rank, itemCount
     integer :: spatialDim, numOwnedElements
     logical, save :: firstTime = .true.
+    integer, allocatable :: localElementCount(:)
     real(ESMF_KIND_R8), allocatable :: ownedElemCoords(:)
     real(ESMF_KIND_R8), pointer :: lats(:), lons(:)
+    real(ESMF_KIND_R8), pointer :: fptr(:)
     character(ESMF_MAXSTR), allocatable     :: itemNameList(:)
     type(ESMF_StateItem_Flag), allocatable  :: itemTypeList(:)
-    character(len=*), parameter :: subname = trim(modName)//':(FieldToNode) '
+    character(len=*), parameter :: subname = trim(modName)//':(StateToNode) '
     !---------------------------------------------------------------------------
 
     rc = ESMF_SUCCESS
     call ESMF_LogWrite(subname//' called', ESMF_LOGMSG_INFO)
-
-    ! Create conduit node
-    cnode = conduit_node_create()
 
     ! Query state
     call ESMF_StateGet(state, itemCount=itemCount, rc=rc)
@@ -160,7 +186,7 @@ contains
 
              ! Extract mesh information and add it to the node
              ! This assumes all fields are on same mesh
-             if (firstTime) then
+             if (.not. conduit_node_has_path(cnode, trim(compName)//'/lon')) then
                 ! Query mesh
                 call ESMF_FieldGet(field, mesh=mesh, rc=rc)
                 if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -181,24 +207,41 @@ contains
                    lats(m) = ownedElemCoords(2*m)
                 end do
 
+                ! Add coordinates to node
+                call conduit_node_set_path_float64_ptr(cnode, trim(compName)//'/lon', lons, int8(numOwnedElements))
+                call conduit_node_set_path_float64_ptr(cnode, trim(compName)//'/lat', lats, int8(numOwnedElements))
+
                 ! Clean memory
                 deallocate(ownedElemCoords)
+                nullify(lons)
+                nullify(lats)
 
-                ! Set nodes
-                call conduit_node_set_path_float64_ptr(cnode, trim(compName)//'_lon', lons, int8(numOwnedElements))
-                call conduit_node_set_path_float64_ptr(cnode, trim(compName)//'_lat', lats, int8(numOwnedElements))
+             end if ! node check for coordinate info
 
-                ! Print node for debugging purpose
-                call conduit_node_save(cnode, trim(compName)//'_node.json', 'json')
+             ! Query field
+             call ESMF_FieldGet(field, rank=rank, rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-                firstTime = .false.
-             end if ! firstTime
-          end if ! itemTypeList  
+             allocate(localElementCount(rank))
+
+             call ESMF_FieldGet(field, localElementCount=localElementCount, rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+             call ESMF_FieldGet(field, farrayPtr=fptr, rc=rc)
+             if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+             ! Add field to node
+             ! TODO: Assuming rank = 1 and also double
+             call conduit_node_set_path_float64_ptr(cnode, &
+               trim(compName)//'/'//trim(itemNameList(n)), fptr, int8(localElementCount(1)))
+
+             ! Clean memory
+             deallocate(localElementCount)
+             nullify(fptr)
+
+          end if ! itemTypeList
        end do
     end if ! itemCount
-
-    ! Pass node to Python
-    call conduit_fort_to_py(cnode)
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
