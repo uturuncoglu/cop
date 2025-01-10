@@ -21,23 +21,28 @@ option(COP_USE_PYTHON "Support to Interact with Python" OFF)
 ### Set required packages
 ###############################################################################
 
+# Find ESMF
 if(NOT ESMF_FOUND)
   find_package(ESMF REQUIRED)
 endif()
 
+# Find Catalyst
 if(COP_USE_CATALYST)
   find_package(catalyst 2.0 REQUIRED)
 endif()
 
+# Find Conduit
 if(COP_USE_PYTHON)
-  # Find Conduit
   find_package(Conduit REQUIRED)
+endif()
+
+if(CONDUIT_PYTHON_ENABLED OR CATALYST_USE_PYTHON)
   # Find Python
   set(Python_FIND_STRATEGY "LOCATION")
   find_package(Python COMPONENTS Interpreter Development)
   set(PYTHON_EXECUTABLE "${Python_EXECUTABLE}")
   # Setup Python
-  include(plugins/python/SetupPython.cmake)
+  include(cmake/SetupPython.cmake)
   # Conduit requires c++14 support
   set(CMAKE_CXX_STANDARD 14)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -82,6 +87,7 @@ add_dependencies(cop cop_catalyst)
 target_link_libraries(cop PRIVATE cop_catalyst)
 if(COP_USE_CATALYST)
   find_package(catalyst 2.0 REQUIRED)
+  target_include_directories(cop PUBLIC ${CATALYST_PYTHONPATH})
   target_link_libraries(cop PRIVATE catalyst::catalyst catalyst::catalyst_fortran)
 endif()
 
@@ -93,13 +99,15 @@ if(COP_USE_PYTHON)
   target_include_directories(cop PUBLIC ${PYTHON_INCLUDE_DIR})
   target_link_libraries(cop PRIVATE conduit::conduit conduit::conduit_python conduit::conduit_mpi)
   target_link_libraries(cop PRIVATE ${PYTHON_LIBRARY})
-  find_library(UTIL_LIB util)
-  find_library(C_LIB c)
-  message("UTIL_LIB = ${UTIL_LIB}")
-  message("C_LIB = ${C_LIB}")
-  target_link_libraries(cop PRIVATE ${UTIL_LIB})
-  target_link_libraries(cop PRIVATE ${C_LIB})
 endif()
+
+get_cmake_property(_variableNames VARIABLES)
+list (SORT _variableNames)
+foreach (_variableName ${_variableNames})
+    if (_variableName MATCHES catalyst OR _variableName MATCHES Catalyst OR _variableName MATCHES CATALYST)
+        message(STATUS "${_variableName}=${${_variableName}}")
+    endif()
+endforeach()
 
 ###############################################################################
 ### Install
