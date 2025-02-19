@@ -5,7 +5,7 @@ module cop_comp_nuopc
   !-----------------------------------------------------------------------------
 
   use ESMF, only: operator(==)
-  use ESMF, only: ESMF_GridComp
+  use ESMF, only: ESMF_GridComp, ESMF_MethodRemove
   use ESMF, only: ESMF_Field, ESMF_FieldGet, ESMF_FieldEmptySet
   use ESMF, only: ESMF_State, ESMF_StateGet, ESMF_StateRemove
   use ESMF, only: ESMF_Clock, ESMF_LogWrite, ESMF_LogFoundAllocError
@@ -23,8 +23,9 @@ module cop_comp_nuopc
   use ESMF, only: ESMF_STATEITEM_STATE, ESMF_STATEITEM_FIELD
   use ESMF, only: ESMF_LOGMSG_ERROR, ESMF_METHOD_RUN
   use ESMF, only: ESMF_GeomType_Flag, ESMF_FieldStatus_Flag
-  use ESMF, only: ESMF_Time, ESMF_TimeGet
-  use ESMF, only: ESMF_Clock, ESMF_ClockGet, ESMF_UtilStringLowerCase
+  use ESMF, only: ESMF_Time, ESMF_TimeGet, ESMF_TimeInterval
+  use ESMF, only: ESMF_Clock, ESMF_ClockGet, ESMF_ClockSet
+  use ESMF, only: ESMF_UtilStringLowerCase
   use ESMF, only: ESMF_DistGridGet, ESMF_DistGridConnection
   use ESMF, only: ESMF_FieldCreate, ESMF_StateIsCreated
   use ESMF, only: ESMF_GridGetCoord, ESMF_STAGGERLOC_CORNER
@@ -35,8 +36,10 @@ module cop_comp_nuopc
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_SetAttribute, NUOPC_GetAttribute
   use NUOPC, only: NUOPC_CompAttributeGet, NUOPC_CompAttributeSet
+  use NUOPC, only: NUOPC_CompCheckSetClock
   use NUOPC, only: NUOPC_Realize
   use NUOPC, only: NUOPC_AddNamespace
+  use NUOPC, only: NUOPC_NoOP
  
   use NUOPC_Model, only: SetVM
   use NUOPC_Model, only: NUOPC_ModelGet
@@ -49,6 +52,8 @@ module cop_comp_nuopc
   use NUOPC_Model, only: label_AcceptTransfer
   use NUOPC_Model, only: label_RealizeAccepted
   use NUOPC_Model, only: label_Advance
+  use NUOPC_Model, only: label_CheckImport
+  use NUOPC_Model, only: label_SetRunClock
 
   use cop_comp_shr, only: ChkErr
   use cop_comp_shr, only: FB_init_pointer
@@ -76,6 +81,7 @@ module cop_comp_nuopc
   !-----------------------------------------------------------------------------
 
   private :: DataInitialize
+  private :: SetRunClock
 
   !-----------------------------------------------------------------------------
   ! Private module data
@@ -157,6 +163,22 @@ contains
     call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_RUN, phaseLabelList=(/"cop_phases_catalyst"/), userRoutine=model_routine_Run, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
     call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, specPhaseLabel="cop_phases_catalyst", specRoutine=cop_phases_catalyst_run, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    !------------------
+    ! Attach specializing method(s)
+    !------------------
+
+    call ESMF_MethodRemove(gcomp, label_CheckImport, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    call NUOPC_CompSpecialize(gcomp, specLabel=label_CheckImport, specRoutine=NUOPC_NoOp, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    ! This is called every time you enter a component phase
+    call ESMF_MethodRemove(gcomp, label_SetRunClock, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    call NUOPC_CompSpecialize(gcomp, specLabel=label_SetRunClock, specRoutine=SetRunClock, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
@@ -843,7 +865,7 @@ contains
                    if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
                    ! Create new grid with new distgrid
-                   newgrid = ESMF_GridCreate(distgrid, gridEdgeLWidth=(/0,0/), gridEdgeUWidth=(/0,1/), rc=rc)
+                   newgrid = ESMF_GridCreate(distgrid, gridEdgeLWidth=(/0,0/), gridEdgeUWidth=(/0,0/), rc=rc)
                    if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
                    ! Clean memory
@@ -945,6 +967,42 @@ contains
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
   end subroutine ModifyDecomp
+
+  !-----------------------------------------------------------------------------
+
+  subroutine SetRunClock(gcomp, rc)
+
+    ! input/output variables
+    type(ESMF_GridComp) :: gcomp
+    integer, intent(out) :: rc
+
+    ! local variables
+    type(ESMF_Clock) :: modelClock, driverClock
+    type(ESMF_Time) :: currTime
+    type(ESMF_TimeInterval) :: timeStep
+    character(len=*), parameter :: subname = trim(modName)//':(SetRunClock) '
+    !---------------------------------------------------------------------------
+
+    rc = ESMF_SUCCESS
+    call ESMF_LogWrite(subname//' called', ESMF_LOGMSG_INFO)
+
+    ! Query component
+    call NUOPC_ModelGet(gcomp, modelClock=modelClock, driverClock=driverClock, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    ! Set the modelClock to have the current start time as the driverClock
+    call ESMF_ClockGet(driverClock, currTime=currTime, timeStep=timeStep, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    call ESMF_ClockSet(modelClock, currTime=currTime, timeStep=timeStep, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    ! Check and set the component clock against the driver clock
+    call NUOPC_CompCheckSetClock(gcomp, driverClock, checkTimeStep=.false., rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
+
+  end subroutine SetRunClock
 
   !-----------------------------------------------------------------------------
 
