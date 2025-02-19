@@ -23,7 +23,7 @@ option(COP_USE_PYTHON "Support to Interact with Python" OFF)
 
 # Find ESMF
 if(NOT ESMF_FOUND)
-  find_package(ESMF REQUIRED)
+  find_package(ESMF 8.8.0 REQUIRED)
 endif()
 
 # Find Catalyst
