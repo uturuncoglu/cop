@@ -4,14 +4,15 @@ module cop_comp_shr
   ! This is the module for shared routines 
   !-----------------------------------------------------------------------------
 
-  use ESMF , only: operator(==)
-  use ESMF , only: ESMF_LogFoundError, ESMF_FAILURE, ESMF_LogWrite
-  use ESMF , only: ESMF_LOGERR_PASSTHRU, ESMF_LOGMSG_INFO, ESMF_SUCCESS
-  use ESMF , only: ESMF_GeomType_Flag, ESMF_State, ESMF_StateGet
-  use ESMF , only: ESMF_Field, ESMF_FieldGet, ESMF_FieldWrite, ESMF_FieldWriteVTK
-  use ESMF , only: ESMF_FieldBundle, ESMF_FieldBundleCreate
-  use ESMF , only: ESMF_MAXSTR, ESMF_GEOMTYPE_GRID, ESMF_GEOMTYPE_MESH
-  use ESMF , only: ESMF_StateGet, ESMF_StateItem_Flag, ESMF_STATEITEM_STATE
+  use ESMF, only: operator(==)
+  use ESMF, only: ESMF_LogFoundError, ESMF_FAILURE, ESMF_LogWrite
+  use ESMF, only: ESMF_LOGERR_PASSTHRU, ESMF_LOGMSG_INFO, ESMF_SUCCESS
+  use ESMF, only: ESMF_GeomType_Flag, ESMF_State, ESMF_StateGet
+  use ESMF, only: ESMF_Field, ESMF_FieldGet, ESMF_FieldWrite, ESMF_FieldWriteVTK
+  use ESMF, only: ESMF_FieldBundle, ESMF_FieldBundleCreate
+  use ESMF, only: ESMF_MAXSTR, ESMF_KIND_R8
+  use ESMF, only: ESMF_GEOMTYPE_GRID, ESMF_GEOMTYPE_MESH
+  use ESMF, only: ESMF_StateGet, ESMF_StateItem_Flag, ESMF_STATEITEM_STATE
 
   use NUOPC, only: NUOPC_GetAttribute
 
@@ -23,10 +24,15 @@ module cop_comp_shr
   !-----------------------------------------------------------------------------
 
   public :: ChkErr
+  public :: StringSplit
   public :: FB_init_pointer
-  public :: StringCountChar
-  public :: StringListGetName
-  public :: StringListGetNum
+
+  !-----------------------------------------------------------------------------
+  ! Public module data
+  !-----------------------------------------------------------------------------
+
+  real(ESMF_KIND_R8), public, parameter :: CONST_PI = 3.14159265358979323846_ESMF_KIND_R8
+  real(ESMF_KIND_R8), public, parameter :: CONST_RAD2DEG = 180.0_ESMF_KIND_R8/CONST_PI
 
   !-----------------------------------------------------------------------------
   ! Private module data
@@ -56,110 +62,51 @@ module cop_comp_shr
 
   !-----------------------------------------------------------------------------
 
-  subroutine StringListGetName(list, k, name, delimiter, rc)
+  function StringSplit(str, delim) result(parts)
+    implicit none
 
     ! ----------------------------------------------
-    ! Get name of k-th field in list
-    ! It is adapted from CDEPS, shr_string_listGetName
-    ! ----------------------------------------------
-
-    ! input/output variables
-    character(len=*), intent(in)  :: list       ! list/string
-    integer         , intent(in)  :: k          ! index of field
-    character(len=*), intent(out) :: name       ! k-th name in list
-    character(1)    , intent(in)  :: delimiter  ! char to search for splitting
-    integer         , intent(out) :: rc
-
-    ! local variables
-    integer :: i,n     ! generic indecies
-    integer :: kFlds   ! number of fields in list
-    integer :: i0,i1   ! name = list(i0:i1)
-    character(*), parameter :: subName = '(StringListGetName)'
-    !---------------------------------------------------------------------------
-
-    rc = ESMF_SUCCESS
-
-    ! Check that this is a valid index ---
-    kFlds = StringListGetNum(list, delimiter)
-    if (k < 1 .or. kFlds < k) then
-      call ESMF_LogWrite(trim(subname)//": ERROR invalid index ", ESMF_LOGMSG_INFO)
-      rc = ESMF_FAILURE
-    end if
-
-    ! Start with whole list, then remove fields before and after desired field ---
-    i0 = 1
-    i1 = len_trim(list)
-
-    ! Remove field names before desired field ---
-    do n=2,k
-       i = index(list(i0:i1), delimiter)
-       i0 = i0 + i
-    end do
-
-    ! Remove field names after desired field ---
-    if ( k < kFlds ) then
-       i = index(list(i0:i1), delimiter)
-       i1 = i0 + i - 2
-    end if
-
-    !Copy result into output variable ---
-    name = list(i0:i1)//"   "
-
-  end subroutine StringListGetName
-
-  !-----------------------------------------------------------------------------
-
-  integer function StringCountChar(str, delimiter)
-
-    ! ----------------------------------------------
-    ! Count number of occurances of a character
-    ! It is adapted from CDEPS, shr_string_countChar
+    ! The `split` function splits a given string into an array of substrings
+    ! based on a specified delimiter.
     ! ----------------------------------------------
 
     ! input/output variables
-    character(len=*), intent(in) :: str        ! string to search
-    character(1), intent(in)     :: delimiter  ! char to search for
+    character(len=*), intent(in) :: str
+    character(len=*), intent(in) :: delim
+    character(len=:), allocatable :: parts(:)
 
     ! local variables
-    integer :: count    ! counts occurances of char
-    integer :: n        ! generic index
-    character(len=*), parameter :: subName = '(StringCountChar)'
+    integer :: i, start, count
+    character(*), parameter :: subName = '(StringSplit)'
     !---------------------------------------------------------------------------
 
+    ! Count the number of delimiters to determine the size of the parts array
     count = 0
-    do n = 1, len_trim(str)
-      if (str(n:n) == delimiter) count = count + 1
+    do i = 1, len(trim(str))
+      if (str(i:i) == delim) count = count+1
     end do
-    StringCountChar = count
 
-  end function StringCountChar
+    ! Allocate the parts array
+    allocate(character(len=len(trim(str))) :: parts(count+1))
 
-  !-----------------------------------------------------------------------------
+    ! Split the string
+    start = 1
+    count = 1
+    do i = 1, len(trim(str))
+      if (str(i:i) == delim) then
+        parts(count) = str(start:i-1)
+        start = i+1
+        count = count+1
+      end if
+    end do
+    parts(count) = str(start:)
 
-  integer function StringListGetNum(str, delimiter)
+    ! Trim the parts to remove any trailing spaces
+    do i = 1, count
+      parts(i) = trim(parts(i))
+    end do
 
-    ! ----------------------------------------------
-    ! Get number of fields in a string list
-    ! It is adapted from CDEPS, shr_string_listGetNum
-    ! ----------------------------------------------
-
-    ! input/output variables
-    character(len=*), intent(in) :: str   ! string to search
-    character(1), intent(in)     :: delimiter  ! char to search for
-
-    ! local variables
-    integer :: count ! counts occurances of char
-    character(len=*), parameter :: subName = '(StringListGetNum)'
-    !---------------------------------------------------------------------------
-
-    StringListGetNum = 0
-
-    if (len_trim(str) > 0) then
-       count = StringCountChar(str, delimiter)
-       StringListGetNum = count + 1
-    endif
-
-  end function StringListGetNum
+  end function StringSplit
 
   !-----------------------------------------------------------------------------
 
@@ -193,9 +140,9 @@ module cop_comp_shr
 
     ! Create field bundle
     !if (fieldCount > 0) then
-    !   ! Get mesh from first non-scalar field in StateIn (assumes all the fields have the same mesh)
-    !   call ESMF_StateGet(StateIn, itemName=lfieldNameList(1), field=lfield, rc=rc)
-    !   if (chkerr(rc,__LINE__,u_FILE_u)) return
+       ! Get mesh from first non-scalar field in StateIn (assumes all the fields have the same mesh)
+       !call ESMF_StateGet(StateIn, itemName=lfieldNameList(1), field=lfield, rc=rc)
+       !if (chkerr(rc,__LINE__,u_FILE_u)) return
     !end if
 
 

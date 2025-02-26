@@ -29,6 +29,7 @@ module cop_phases_python
   use conduit
 
   use cop_comp_shr, only: ChkErr
+  use cop_comp_shr, only: CONST_RAD2DEG
   use cop_comp_internalstate, only: InternalState
   use cop_python_interface, only: conduit_fort_to_py
 
@@ -53,8 +54,6 @@ module cop_phases_python
   logical :: allGatherToRoot = .false.
   character(ESMF_MAXSTR) :: scriptName
 
-  real(ESMF_KIND_R8), parameter :: CONST_PI = 3.14159265358979323846_ESMF_KIND_R8
-  real(ESMF_KIND_R8), parameter :: CONST_RAD2DEG = 180.0_ESMF_KIND_R8/CONST_PI
 
   character(len=*), parameter :: modName = "(cop_phases_python)"
   character(len=*), parameter :: u_FILE_u = __FILE__

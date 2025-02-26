@@ -57,8 +57,7 @@ module cop_comp_nuopc
 
   use cop_comp_shr, only: ChkErr
   use cop_comp_shr, only: FB_init_pointer
-  use cop_comp_shr, only: StringListGetName
-  use cop_comp_shr, only: StringListGetNum
+  use cop_comp_shr, only: StringSplit
   
   use cop_comp_internalstate, only: InternalState
   use cop_comp_internalstate, only: InternalStateInit 
@@ -243,7 +242,7 @@ contains
     integer, intent(out) :: rc
 
     ! local variables
-    integer :: i, j, k, n, m
+    integer :: i, j, k, n
     integer :: stat
     integer :: fieldCount, itemCount
     integer :: importItemCount, importNestedItemCount
@@ -296,24 +295,13 @@ contains
     call NUOPC_CompAttributeGet(gcomp, name="KeepFieldList", value=cvalue, &
       isPresent=isPresent, isSet=isSet, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-    m = 0
     if (isPresent .and. isSet) then
-       ! Get number of fields in the list
-       m = StringListGetNum(cvalue, ":")
-       if (m > 0) then
-          ! Allocate temporary array for field list
-          allocate(fieldNamesToKeep(m))
-
-          ! Loop over occurances and fill the field list
-          do n = 1, m
-             call StringListGetName(cvalue, n, cname, ':', rc)
-             if (ChkErr(rc,__LINE__,u_FILE_u)) return
-             fieldNamesToKeep(n) = trim(cname)
-             write(message, fmt='(A,I2.2,A)') trim(subname)//': KeepFieldList(',n,') = '//trim(fieldNamesToKeep(n))
-             call ESMF_LogWrite(trim(message), ESMF_LOGMSG_INFO)
-          end do
-       end if
+       ! Split string
+       fieldNamesToKeep = StringSplit(trim(cvalue), ":")
+       do n = 1, size(fieldNamesToKeep, dim=1)
+          write(message, fmt='(A,I2.2,A)') trim(subname)//': KeepFieldList(',n,') = '//trim(fieldNamesToKeep(n))
+          call ESMF_LogWrite(trim(message), ESMF_LOGMSG_INFO)
+       end do
     endif
 
     !------------------
@@ -327,7 +315,6 @@ contains
           isPresent=isPresent, isSet=isSet, rc=rc)
        if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-       m = 0
        if (isPresent .and. isSet) then
           ! Add scalar field to remove list
           if (trim(scalar_field_name) /= '') then
@@ -337,22 +324,12 @@ contains
                 cvalue = trim(cvalue)//':'//trim(scalar_field_name)
              end if
           end if
-
-          ! Get number of fields in the list
-          m = StringListGetNum(cvalue, ':')
-          if (m > 0) then
-             ! Allocate temporary array for field list
-             allocate(fieldNamesToRemove(m))
-
-             ! Loop over occurances and fill the field list
-             do n = 1, m 
-                call StringListGetName(cvalue, n, cname, ':', rc)        
-                if (ChkErr(rc,__LINE__,u_FILE_u)) return
-                fieldNamesToRemove(n) = trim(cname)
-                write(message, fmt='(A,I2.2,A)') trim(subname)//': RemoveFieldList(',n,') = '//trim(fieldNamesToRemove(n))
-                call ESMF_LogWrite(trim(message), ESMF_LOGMSG_INFO)
-             end do
-          end if
+          ! Split string
+          fieldNamesToRemove = StringSplit(trim(cvalue), ":")
+          do n = 1, size(fieldNamesToKeep, dim=1)
+             write(message, fmt='(A,I2.2,A)') trim(subname)//': RemoveFieldList(',n,') = '//trim(fieldNamesToRemove(n))
+             call ESMF_LogWrite(trim(message), ESMF_LOGMSG_INFO)
+          end do
        else
           ! Allocate temporary array for field list
           allocate(fieldNamesToRemove(1))

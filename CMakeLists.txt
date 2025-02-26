@@ -15,7 +15,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 ###############################################################################
 
 option(COP_USE_CATALYST "Support to Use Catalyst for Insitu Visualization" OFF)
-option(COP_USE_PYTHON "Support to Interact with Python" OFF)
+option(COP_USE_PYTHON   "Support to Interact with Python"                  OFF)
 
 ###############################################################################
 ### Set required packages
@@ -75,6 +75,7 @@ set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/mod)
 
 add_library(cop STATIC  ${cop_src_files})
 target_include_directories(cop PRIVATE ${ESMF_F90COMPILEPATHS}) 
+target_link_libraries(cop PRIVATE esmf)
 
 # Support for I/O, which is provided by ESMF/NUOPC
 add_subdirectory(plugins/io)
@@ -86,7 +87,6 @@ add_subdirectory(plugins/catalyst)
 add_dependencies(cop cop_catalyst)
 target_link_libraries(cop PRIVATE cop_catalyst)
 if(COP_USE_CATALYST)
-  find_package(catalyst 2.0 REQUIRED)
   target_include_directories(cop PUBLIC ${CATALYST_PYTHONPATH})
   target_link_libraries(cop PRIVATE catalyst::catalyst catalyst::catalyst_fortran)
 endif()
@@ -101,13 +101,14 @@ if(COP_USE_PYTHON)
   target_link_libraries(cop PRIVATE ${PYTHON_LIBRARY})
 endif()
 
-get_cmake_property(_variableNames VARIABLES)
-list (SORT _variableNames)
-foreach (_variableName ${_variableNames})
-    if (_variableName MATCHES catalyst OR _variableName MATCHES Catalyst OR _variableName MATCHES CATALYST)
-        message(STATUS "${_variableName}=${${_variableName}}")
-    endif()
-endforeach()
+# List all variables (for debugging)
+#get_cmake_property(_variableNames VARIABLES)
+#list (SORT _variableNames)
+#foreach (_variableName ${_variableNames})
+#    if (_variableName MATCHES catalyst OR _variableName MATCHES Catalyst OR _variableName MATCHES CATALYST)
+#        message(STATUS "${_variableName}=${${_variableName}}")
+#    endif()
+#endforeach()
 
 ###############################################################################
 ### Install
