@@ -22,8 +22,8 @@ module cop_phases_catalyst
   use NUOPC, only: NUOPC_CompAttributeGet
   use NUOPC_Model, only: NUOPC_ModelGet
 
-  use catalyst_conduit
   use catalyst_api
+  use catalyst_conduit
 
   use cop_comp_shr, only: ChkErr, StringSplit
   use cop_comp_shr, only: CONST_RAD2DEG
@@ -48,6 +48,20 @@ module cop_phases_catalyst
   ! Private module data
   !-----------------------------------------------------------------------------
 
+  type meshType
+    integer :: nodeCount
+    integer :: elementCount
+    integer :: numElementConn
+    character(ESMF_MAXSTR) :: elementShape
+    real(ESMF_KIND_R8), allocatable :: nodeCoordsX(:)
+    real(ESMF_KIND_R8), allocatable :: nodeCoordsY(:)
+    integer, allocatable :: elementTypes(:)
+    integer, allocatable :: elementTypesShape(:)
+    integer, allocatable :: elementTypesOffset(:)
+    integer, allocatable :: elementConn(:)
+  end type meshType
+
+  type(meshType), allocatable :: myMesh(:)
   character(len=*), parameter :: modName = "(cop_phases_catalyst)"
   character(len=*), parameter :: u_FILE_u = __FILE__
 
@@ -63,12 +77,13 @@ contains
 
     ! local variables
     type(C_PTR) :: node
+    type(C_PTR) :: info
     type(C_PTR) :: scriptArgsItem, scriptArgs
     integer(kind(catalyst_status)) :: err
     integer :: n, numScripts, step
-    integer :: mpiComm
+    integer :: mpiComm, localPet, petCount
     real(kind=8) :: time
-    logical :: isPresent, isSet
+    logical :: isPresent, isSet, res
     logical, save :: first_time = .true.
     type(InternalState) :: is_local
     type(ESMF_VM) :: vm
@@ -100,7 +115,7 @@ contains
     call ESMF_GridCompGet(gcomp, vm=vm, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    call ESMF_VMGet(vm, mpiCommunicator=mpiComm, rc=rc)
+    call ESMF_VMGet(vm, mpiCommunicator=mpiComm, localPet=localPet, petCount=petCount, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     ! Query current time
@@ -138,7 +153,7 @@ contains
           ! Add arguments
           scriptArgs = catalyst_conduit_node_fetch(node, trim(tmpStr)//"/args")
           scriptArgsItem = catalyst_conduit_node_append(scriptArgs)
-          call catalyst_conduit_node_set_char8_str(scriptArgsItem, "--channel-name=grid")
+          call catalyst_conduit_node_set_char8_str(scriptArgsItem, "--channel-name=ocn")
        end do
 
        ! Set implementation type
@@ -166,8 +181,14 @@ contains
        ! Add MPI communicator
        call catalyst_conduit_node_set_path_int32(node, "catalyst/mpi_comm", mpiComm)
 
-       ! Print out node for debugging
-       !call catalyst_conduit_node_print_detailed(node)
+       ! Save node for debugging purposes, if needed
+       !write(message, fmt='(A,I3.3,A,I3.3)') "init_node_"//trim(timeStr)//"_", localPet, "_", petCount
+       !call catalyst_conduit_node_save(node, trim(message)//".json", "json")
+
+       ! Print node information with details about memory allocation
+       !info = catalyst_conduit_node_create()
+       !call catalyst_conduit_node_info(node, info)
+       !call catalyst_conduit_node_print(info)
 
        ! Initialize catalyst
        err = c_catalyst_initialize(node)
@@ -180,6 +201,10 @@ contains
 
        ! Destroy node which is not required
        call catalyst_conduit_node_destroy(node)
+       !call catalyst_conduit_node_destroy(info)
+
+       ! Allocate arrays to store mesh information for each connected component
+       allocate(myMesh(is_local%wrap%numComp))
 
        ! Set flag
        first_time = .false.
@@ -196,12 +221,22 @@ contains
     ! Add channel for all components
     do n = 1, is_local%wrap%numComp
        ! Add content of state to Conduit node
-       call StateToChannel(is_local%wrap%NStateImp(n), trim(is_local%wrap%compName(n)), node, rc=rc)
+       call StateToChannel(is_local%wrap%NStateImp(n), trim(is_local%wrap%compName(n)), n, node, rc=rc)
        if (ChkErr(rc,__LINE__,u_FILE_u)) return
     end do
 
-    ! Print out node for debugging
-    call catalyst_conduit_node_print_detailed(node)
+    ! Save node for debugging purposes, if needed
+    !write(message, fmt='(A,I3.3,A,I3.3)') "exec_node_"//trim(timeStr)//"_", localPet, "_", petCount
+    !call catalyst_conduit_node_save(node, trim(message)//".json", "json")
+
+    ! Print node information with details about memory allocation
+    !info = catalyst_conduit_node_create()
+    !call catalyst_conduit_node_info(node, info)
+    !call catalyst_conduit_node_print(info)
+
+    ! Verify mesh
+    !res = conduit_blueprint_mesh_verify(node, info)
+    !call catalyst_conduit_node_print(info)
 
     ! Execute catalyst
     err = c_catalyst_execute(node)
@@ -212,8 +247,9 @@ contains
        return
     end if
 
-    ! Destroy node
+    ! Destroy nodes
     call catalyst_conduit_node_destroy(node)
+    !call catalyst_conduit_node_destroy(info)
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
@@ -221,11 +257,12 @@ contains
 
   !-----------------------------------------------------------------------------
 
-  subroutine StateToChannel(state, compName, node, rc)
+  subroutine StateToChannel(state, compName, id, node, rc)
 
     ! input/output variables
     type(ESMF_State), intent(in) :: state
     character(len=*), intent(in) :: compName
+    integer, intent(in) :: id
     type(C_PTR), intent(inout) :: node
     integer, intent(out), optional :: rc
 
@@ -234,17 +271,13 @@ contains
     type(C_PTR) :: mesh
     type(C_PTR) :: fields
     integer :: n, m, itemCount
-    integer :: spatialDim, numOwnedNodes, numOwnedElements
-    integer :: numNodesMin, numNodesMax, dataSize
-    type(ESMF_Field) :: field
+    integer :: spatialDim, dataSize
+    logical :: hasTri = .false., hasQuad = .false.
     type(ESMF_Mesh) :: fmesh
+    type(ESMF_Field) :: field
     type(ESMF_CoordSys_Flag) :: coordSys
-    integer, allocatable :: elemConn(:)
-    integer, allocatable :: elementTypes(:)
     real(ESMF_KIND_R8), pointer :: farrayPtr(:)
-    real(ESMF_KIND_R8), allocatable :: ownedNodeCoords(:)
-    real(ESMF_KIND_R8), allocatable :: ownedNodeLats(:)
-    real(ESMF_KIND_R8), allocatable :: ownedNodeLons(:)
+    real(ESMF_KIND_R8), allocatable :: nodeCoords(:)
     character(ESMF_MAXSTR), allocatable :: itemNameList(:)
     type(ESMF_StateItem_Flag), allocatable :: itemTypeList(:)
     character(ESMF_MAXSTR) :: message
@@ -278,82 +311,111 @@ contains
              call ESMF_StateGet(state, itemName=itemNameList(n), field=field, rc=rc)
              if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
+             ! Prepare mesh data for Catalyst node
+             if (.not. allocated(myMesh(id)%nodeCoordsX)) then
+                ! Query field mesh
+                call ESMF_FieldGet(field, mesh=fmesh, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                ! Extract required information from mesh
+                call ESMF_MeshGet(fmesh, spatialDim=spatialDim, nodeCount=myMesh(id)%nodeCount, &
+                   elementCount=myMesh(id)%elementCount)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                ! Allocate coordinate and element type arrays
+                allocate(myMesh(id)%nodeCoordsX(myMesh(id)%nodeCount))
+                allocate(myMesh(id)%nodeCoordsY(myMesh(id)%nodeCount))
+                allocate(myMesh(id)%elementTypes(myMesh(id)%elementCount))
+                allocate(myMesh(id)%elementTypesShape(myMesh(id)%elementCount))
+                allocate(myMesh(id)%elementTypesOffset(myMesh(id)%elementCount))
+
+                ! Get element types to find final numElementConn
+                call ESMF_MeshGet(fmesh, elementTypes=myMesh(id)%elementTypes, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                myMesh(id)%numElementConn = sum(myMesh(id)%elementTypes, dim=1)
+
+                ! Allocate element connection array
+                allocate(myMesh(id)%elementConn(myMesh(id)%numElementConn))
+
+                ! Get coordinates
+                allocate(nodeCoords(spatialDim*myMesh(id)%nodeCount))
+                call ESMF_MeshGet(fmesh, nodeCoords=nodeCoords, coordSys=coordSys, &
+                   elementConn=myMesh(id)%elementConn, rc=rc)
+                if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+                do m = 1, myMesh(id)%nodeCount
+                   myMesh(id)%nodeCoordsX(m) = nodeCoords(2*m-1)
+                   myMesh(id)%nodeCoordsY(m) = nodeCoords(2*m)
+                end do
+                deallocate(nodeCoords)
+
+                ! Convert coordinates from radian to degree
+                if (coordSys /= ESMF_COORDSYS_SPH_DEG) then
+                   myMesh(id)%nodeCoordsX = myMesh(id)%nodeCoordsX*CONST_RAD2DEG
+                   myMesh(id)%nodeCoordsY = myMesh(id)%nodeCoordsY*CONST_RAD2DEG
+                end if
+
+                ! Find out element types
+                ! At this point only supports triangles and quads and their mixtures
+                do m = 1, myMesh(id)%elementCount
+                   if (myMesh(id)%elementTypes(m) == 3) then
+                      hasTri = .true.
+                      myMesh(id)%elementShape = "tri"
+                      myMesh(id)%elementTypesShape(m) = 5 ! VTK_TRIANGLE
+                   else if (myMesh(id)%elementTypes(m) == 4) then
+                      hasQuad = .true.
+                      myMesh(id)%elementShape = "quad"
+                      myMesh(id)%elementTypesShape(m) = 9 ! VTK_QUAD
+                   else
+                      write(message, fmt='(A,I,A)') trim(subname)//": Failed to execute Catalyst: "// &
+                         "only tri, quad and their mixtures are supported as element shape. "// &
+                         "The given mesh has elements with ", myMesh(id)%elementTypes(m), " nodes."
+                      call ESMF_LogWrite(trim(message), ESMF_LOGMSG_ERROR)
+                      rc = ESMF_FAILURE
+                      return
+                   end if
+                end do
+
+                if (hasTri .and. hasQuad) myMesh(id)%elementShape = "mixed"
+
+                ! Calculate element offsets
+                myMesh(id)%elementTypesOffset(1) = 0
+                do m = 2, myMesh(id)%elementCount
+                   myMesh(id)%elementTypesOffset(m) = myMesh(id)%elementTypesOffset(m-1)+myMesh(id)%elementTypes(m-1)
+                end do
+
+                ! Set element connection (Conduit uses 0-based indexes but ESMF is 1-based)
+                myMesh(id)%elementConn(:) = myMesh(id)%elementConn(:)-1
+             end if
+
+             ! Add mesh information to Catalyst node
              if (n == 1) then
                 ! Add mesh to channel
                 call catalyst_conduit_node_set_path_char8_str(channel, "type", "mesh")
 
-                ! Create mesh
+                ! Create mesh node
                 mesh = catalyst_conduit_node_fetch(channel, "data")
 
                 ! Set type of mesh, construct as an unstructured mesh
                 call catalyst_conduit_node_set_path_char8_str(mesh, "coordsets/coords/type", "explicit")
 
-                ! Query field mesh
-                call ESMF_FieldGet(field, mesh=fmesh, rc=rc)
-                if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-                ! Extract coordinate information
-                call ESMF_MeshGet(fmesh, spatialDim=spatialDim, numOwnedNodes=numOwnedNodes, &
-                   numOwnedElements=numOwnedElements, rc=rc)
-                if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-                ! Allocate data structures
-                allocate(elementTypes(numOwnedElements))
-                allocate(ownedNodeLats(numOwnedNodes))
-                allocate(ownedNodeLons(numOwnedNodes))
-                allocate(ownedNodeCoords(spatialDim*numOwnedNodes))
-
-                ! Get element coordinates and fill arrays
-                call ESMF_MeshGet(fmesh, ownedNodeCoords=ownedNodeCoords, &
-                   coordSys=coordSys, elementTypes=elementTypes, rc=rc)
-                if (ChkErr(rc,__LINE__,u_FILE_u)) return
-
-                do m = 1, numOwnedNodes
-                   ownedNodeLons(m) = ownedNodeCoords(2*m-1)
-                   ownedNodeLats(m) = ownedNodeCoords(2*m)
-                end do
-
-                ! Convert coordinates from radian to degree
-                if (coordSys /= ESMF_COORDSYS_SPH_DEG) then
-                   ownedNodeLons = ownedNodeLons*CONST_RAD2DEG
-                   ownedNodeLats = ownedNodeLats*CONST_RAD2DEG
-                end if
-
                 ! Add coordinates
                 call catalyst_conduit_node_set_path_external_float64_ptr(mesh, "coordsets/coords/values/x", &
-                   ownedNodeLons, int8(numOwnedNodes))
+                   myMesh(id)%nodeCoordsX, int8(myMesh(id)%nodeCount))
                 call catalyst_conduit_node_set_path_external_float64_ptr(mesh, "coordsets/coords/values/y", &
-                   ownedNodeLats, int8(numOwnedNodes))
+                   myMesh(id)%nodeCoordsY, int8(myMesh(id)%nodeCount))
 
                 ! Add topology
                 call catalyst_conduit_node_set_path_char8_str(mesh, "topologies/mesh/type", "unstructured")
                 call catalyst_conduit_node_set_path_char8_str(mesh, "topologies/mesh/coordset", "coords")
-                numNodesMin = minval(elementTypes, dim=1)
-                numNodesMax = maxval(elementTypes, dim=1)
-                if (numNodesMin == numNodesMax) then
-                   if (numNodesMin == 3) then
-                      allocate(elemConn(numOwnedElements*3))
-                      call catalyst_conduit_node_set_path_char8_str(mesh, "topologies/mesh/elements/shape", "tri")
-                   else if (numNodesMin == 4) then
-                      allocate(elemConn(numOwnedElements*4))
-                      call catalyst_conduit_node_set_path_char8_str(mesh, "topologies/mesh/elements/shape", "quad")
-                   else
-                      write(message, fmt='(A,I,A)') trim(subname)//": Failed to execute Catalyst: "// &
-                         "only tri and quad are supported as element shape. the given mesh has ", &
-                         numNodesMin, "nodes in each element."
-                      call ESMF_LogWrite(trim(message), ESMF_LOGMSG_ERROR)
-                      rc = ESMF_FAILURE
-                      return
-                   end if
-                else
-                   ! call catalyst_conduit_node_set_path_char8_str(mesh, "topologies/mesh/elements/shape", "mixed")
-                   call ESMF_LogWrite(trim(subname)//": Failed to execute Catalyst: mixed shape elements are not supported.", ESMF_LOGMSG_ERROR)
-                   rc = ESMF_FAILURE
-                   return
-                end if
-
-                call catalyst_conduit_node_set_path_external_int32_ptr(mesh, "topologies/mesh/elements/connectivity", &
-                   elemConn, int8(size(elemConn, dim=1)))
+                call catalyst_conduit_node_set_path_char8_str(mesh, "topologies/mesh/elements/shape", trim(myMesh(id)%elementShape))
+                if (hasTri) call catalyst_conduit_node_set_path_int32(mesh, "topologies/mesh/elements/shape_map/tri", 5)
+                if (hasQuad) call catalyst_conduit_node_set_path_int32(mesh, "topologies/mesh/elements/shape_map/quad", 9)
+                call catalyst_conduit_node_set_path_int32_ptr(mesh, "topologies/mesh/elements/shapes", myMesh(id)%elementTypesShape, int8(myMesh(id)%elementCount))
+                call catalyst_conduit_node_set_path_int32_ptr(mesh, "topologies/mesh/elements/sizes", myMesh(id)%elementTypes, int8(myMesh(id)%elementCount))
+                call catalyst_conduit_node_set_path_int32_ptr(mesh, "topologies/mesh/elements/offsets", myMesh(id)%elementTypesOffset, int8(myMesh(id)%elementCount))
+                call catalyst_conduit_node_set_path_int32_ptr(mesh, "topologies/mesh/elements/connectivity", myMesh(id)%elementConn, int8(myMesh(id)%numElementConn))
 
                 ! Create node for fields
                 fields = catalyst_conduit_node_fetch(mesh, "fields")
@@ -363,21 +425,30 @@ contains
              call ESMF_FieldGet(field, farrayPtr=farrayPtr, rc=rc)
              if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-             ! Add fields
-             if (size(farrayPtr, dim=1) == numOwnedElements) then
-                dataSize = numOwnedElements
+             ! Add fields to Catalyst node
+             if (size(farrayPtr, dim=1) == myMesh(id)%elementCount) then
+                dataSize = myMesh(id)%elementCount
                 call catalyst_conduit_node_set_path_char8_str(fields, trim(itemNameList(n))//"/association", "element")
              else
-                dataSize = numOwnedNodes
+                dataSize = myMesh(id)%nodeCount
                 call catalyst_conduit_node_set_path_char8_str(fields, trim(itemNameList(n))//"/association", "vertex")
              end if
              call catalyst_conduit_node_set_path_char8_str(fields, trim(itemNameList(n))//"/topology", "mesh")
              call catalyst_conduit_node_set_path_char8_str(fields, trim(itemNameList(n))//"/volume_dependent", "false")
              call catalyst_conduit_node_set_path_external_float64_ptr(fields, &
                 trim(itemNameList(n))//"/values", farrayPtr, int8(dataSize))
-          end if
+
+             ! Init pointers
+             nullify(farrayPtr)
+
+          end if ! itemTypeList
        end do
-    end if
+
+       ! Clean memory
+       deallocate(itemNameList)
+       deallocate(itemTypeList)
+
+    end if ! itemCount
 
     call ESMF_LogWrite(subname//' done for '//trim(compName), ESMF_LOGMSG_INFO)
 
