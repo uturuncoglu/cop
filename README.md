@@ -20,4 +20,4 @@ https://github.com/uturuncoglu/GeoGate
 License
 =======
 
-Conduit is released under a MIT-style license - for detailed license info, refer to: [LICENSE](/LICENSE)
+GeoGate is released under a MIT-style license - for detailed license info, refer to: [LICENSE](/LICENSE)
