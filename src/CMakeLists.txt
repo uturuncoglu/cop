@@ -84,8 +84,8 @@ target_link_libraries(geogate PRIVATE geogate_io)
 
 # Support for ParaView Catalyst
 add_subdirectory(plugins/catalyst)
-add_dependencies(geogate cop_catalyst)
-target_link_libraries(geogate PRIVATE cop_catalyst)
+add_dependencies(geogate geogate_catalyst)
+target_link_libraries(geogate PRIVATE geogate_catalyst)
 if(GEOGATE_USE_CATALYST)
   target_include_directories(geogate PUBLIC ${CATALYST_PYTHONPATH})
   target_link_libraries(geogate PRIVATE catalyst::catalyst catalyst::catalyst_fortran)
@@ -93,8 +93,8 @@ endif()
 
 # Support for Python
 add_subdirectory(plugins/python)
-add_dependencies(geogate cop_python)
-target_link_libraries(geogate PRIVATE cop_python)
+add_dependencies(geogate geogate_python)
+target_link_libraries(geogate PRIVATE geogate_python)
 if(GEOGATE_USE_PYTHON)
   target_include_directories(geogate PUBLIC ${PYTHON_INCLUDE_DIR})
   target_link_libraries(geogate PRIVATE conduit::conduit conduit::conduit_python conduit::conduit_mpi)
