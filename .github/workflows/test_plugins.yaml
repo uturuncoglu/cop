@@ -4,11 +4,11 @@ env:
   spack_version: v1.0.0-alpha.2
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
-    branches: [ main ]
+  #push:
+  #  branches: [ main ]
+  #pull_request:
+  #  types: [opened, synchronize, reopened, labeled, unlabeled]
+  #  branches: [ main ]
   workflow_dispatch:
 
 jobs:
