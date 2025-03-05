@@ -1,4 +1,4 @@
-module cop_phases_io
+module geogate_phases_io
 
   !-----------------------------------------------------------------------------
   ! Write imported fields
@@ -18,8 +18,8 @@ module cop_phases_io
 
   use NUOPC_Model, only: NUOPC_ModelGet
 
-  use cop_comp_shr, only: ChkErr
-  use cop_comp_internalstate, only: InternalState
+  use geogate_share, only: ChkErr
+  use geogate_internalstate, only: InternalState
 
   implicit none
   private
@@ -28,7 +28,7 @@ module cop_phases_io
   ! Public module routines
   !-----------------------------------------------------------------------------
 
-  public :: cop_phases_io_run
+  public :: geogate_phases_io_run
 
   !-----------------------------------------------------------------------------
   ! Private module routines
@@ -39,14 +39,14 @@ module cop_phases_io
   !-----------------------------------------------------------------------------
 
   integer :: dbug = 0
-  character(len=*), parameter :: modName = "(cop_phases_io)"
+  character(len=*), parameter :: modName = "(geogate_phases_io)"
   character(len=*), parameter :: u_FILE_u = __FILE__
 
 !===============================================================================
 contains
 !===============================================================================
 
-  subroutine cop_phases_io_run(gcomp, rc)
+  subroutine geogate_phases_io_run(gcomp, rc)
 
     ! input/output variables
     type(ESMF_GridComp)  :: gcomp
@@ -59,7 +59,7 @@ contains
     type(ESMF_Clock) :: clock
     type(ESMF_State) :: importState
     character(len=ESMF_MAXSTR) :: timeStr
-    character(len=*), parameter :: subname = trim(modName)//':(cop_phases_io_run) '
+    character(len=*), parameter :: subname = trim(modName)//':(geogate_phases_io_run) '
     !---------------------------------------------------------------------------
 
     rc = ESMF_SUCCESS
@@ -90,7 +90,7 @@ contains
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
-  end subroutine cop_phases_io_run
+  end subroutine geogate_phases_io_run
 
   !-----------------------------------------------------------------------------
 
@@ -216,4 +216,4 @@ contains
 
   end subroutine StateWrite
 
-end module cop_phases_io
+end module geogate_phases_io

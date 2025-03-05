@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.19)
 
-project(cop
+project(geogate
         VERSION 1.0
         LANGUAGES C CXX Fortran)
 
@@ -14,8 +14,8 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 ### Build options
 ###############################################################################
 
-option(COP_USE_CATALYST "Support to Use Catalyst for Insitu Visualization" OFF)
-option(COP_USE_PYTHON   "Support to Interact with Python"                  OFF)
+option(GEOGATE_USE_CATALYST "Support to Use Catalyst for Insitu Visualization" OFF)
+option(GEOGATE_USE_PYTHON   "Support to Interact with Python"                  OFF)
 
 ###############################################################################
 ### Set required packages
@@ -27,12 +27,12 @@ if(NOT ESMF_FOUND)
 endif()
 
 # Find Catalyst
-if(COP_USE_CATALYST)
+if(GEOGATE_USE_CATALYST)
   find_package(catalyst 2.0 REQUIRED)
 endif()
 
 # Find Conduit
-if(COP_USE_PYTHON)
+if(GEOGATE_USE_PYTHON)
   find_package(Conduit REQUIRED)
 endif()
 
@@ -58,10 +58,10 @@ endif()
 ### File lists and macros
 ###############################################################################
 
-list(APPEND cop_src_files
-  cop_comp_internalstate.F90
-  cop_comp_nuopc.F90
-  cop_comp_shr.F90)
+list(APPEND geogate_src_files
+  geogate_internalstate.F90
+  geogate_nuopc.F90
+  geogate_share.F90)
 
 ###############################################################################
 ### Set variables
@@ -73,32 +73,32 @@ set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/mod)
 ### Application
 ###############################################################################
 
-add_library(cop STATIC  ${cop_src_files})
-target_include_directories(cop PRIVATE ${ESMF_F90COMPILEPATHS}) 
-target_link_libraries(cop PRIVATE esmf)
+add_library(geogate STATIC  ${geogate_src_files})
+target_include_directories(geogate PRIVATE ${ESMF_F90COMPILEPATHS}) 
+target_link_libraries(geogate PRIVATE esmf)
 
 # Support for I/O, which is provided by ESMF/NUOPC
 add_subdirectory(plugins/io)
-add_dependencies(cop cop_io)
-target_link_libraries(cop PRIVATE cop_io)
+add_dependencies(geogate geogate_io)
+target_link_libraries(geogate PRIVATE geogate_io)
 
 # Support for ParaView Catalyst
 add_subdirectory(plugins/catalyst)
-add_dependencies(cop cop_catalyst)
-target_link_libraries(cop PRIVATE cop_catalyst)
-if(COP_USE_CATALYST)
-  target_include_directories(cop PUBLIC ${CATALYST_PYTHONPATH})
-  target_link_libraries(cop PRIVATE catalyst::catalyst catalyst::catalyst_fortran)
+add_dependencies(geogate cop_catalyst)
+target_link_libraries(geogate PRIVATE cop_catalyst)
+if(GEOGATE_USE_CATALYST)
+  target_include_directories(geogate PUBLIC ${CATALYST_PYTHONPATH})
+  target_link_libraries(geogate PRIVATE catalyst::catalyst catalyst::catalyst_fortran)
 endif()
 
 # Support for Python
 add_subdirectory(plugins/python)
-add_dependencies(cop cop_python)
-target_link_libraries(cop PRIVATE cop_python)
-if(COP_USE_PYTHON)
-  target_include_directories(cop PUBLIC ${PYTHON_INCLUDE_DIR})
-  target_link_libraries(cop PRIVATE conduit::conduit conduit::conduit_python conduit::conduit_mpi)
-  target_link_libraries(cop PRIVATE ${PYTHON_LIBRARY})
+add_dependencies(geogate cop_python)
+target_link_libraries(geogate PRIVATE cop_python)
+if(GEOGATE_USE_PYTHON)
+  target_include_directories(geogate PUBLIC ${PYTHON_INCLUDE_DIR})
+  target_link_libraries(geogate PRIVATE conduit::conduit conduit::conduit_python conduit::conduit_mpi)
+  target_link_libraries(geogate PRIVATE ${PYTHON_LIBRARY})
 endif()
 
 # List all variables (for debugging)
@@ -115,13 +115,13 @@ endif()
 ###############################################################################
 
 install(
-  TARGETS cop
-  EXPORT  cop-config
+  TARGETS geogate
+  EXPORT  geogate-config
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   COMPONENT Library)
 
 install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/mod DESTINATION ${CMAKE_INSTALL_PREFIX})
 
-install(EXPORT      cop-config
+install(EXPORT      geogate-config
         DESTINATION lib/cmake )

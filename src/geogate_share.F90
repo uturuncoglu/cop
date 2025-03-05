@@ -1,4 +1,4 @@
-module cop_comp_shr
+module geogate_share
 
   !-----------------------------------------------------------------------------
   ! This is the module for shared routines 
@@ -39,7 +39,7 @@ module cop_comp_shr
   ! Private module data
   !-----------------------------------------------------------------------------
 
-  character(*), parameter :: modName =  "(cop_comp_shr)" 
+  character(*), parameter :: modName =  "(geogate_share)" 
   character(len=*), parameter :: u_FILE_u = __FILE__ 
 
 !===============================================================================  
@@ -151,4 +151,4 @@ module cop_comp_shr
 
   end subroutine FB_init_pointer
 
-end module cop_comp_shr
+end module geogate_share

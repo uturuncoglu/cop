@@ -1,4 +1,4 @@
-module cop_comp_internalstate
+module geogate_internalstate
 
   !-----------------------------------------------------------------------------
   ! This is the module for shared routines related to internal state
@@ -15,7 +15,7 @@ module cop_comp_internalstate
   use NUOPC, only: NUOPC_GetAttribute
   use NUOPC_Model, only: NUOPC_ModelGet
 
-  use cop_comp_shr, only: ChkErr
+  use geogate_share, only: ChkErr
 
   implicit none
   private
@@ -46,7 +46,7 @@ module cop_comp_internalstate
   ! Private module data
   !-----------------------------------------------------------------------------
 
-  character(*), parameter :: modName =  "(cop_comp_internalstate)"
+  character(*), parameter :: modName =  "(geogate_internalstate)"
   character(len=*), parameter :: u_FILE_u = __FILE__
 
 !===============================================================================  
@@ -166,4 +166,4 @@ module cop_comp_internalstate
 
   end subroutine InternalStateInit
 
-end module cop_comp_internalstate
+end module geogate_internalstate

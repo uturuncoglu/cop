@@ -1,7 +1,7 @@
-module cop_comp_nuopc
+module geogate_nuopc
 
   !-----------------------------------------------------------------------------
-  ! This is the NUOPC cap for generic co-processing component (COP)
+  ! This is the NUOPC cap for GeoGate 
   !-----------------------------------------------------------------------------
 
   use ESMF, only: operator(==)
@@ -88,7 +88,7 @@ module cop_comp_nuopc
   !-----------------------------------------------------------------------------
 
   integer :: dbug = 0
-  character(len=*), parameter :: modName = "(cop_comp_nuopc)"
+  character(len=*), parameter :: modName = "(geogate_nuopc)"
   character(len=*), parameter :: u_FILE_u = __FILE__
 
 !===============================================================================
@@ -148,21 +148,21 @@ contains
     !------------------
 
     ! I/O phase
-    call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_RUN, phaseLabelList=(/ 'cop_phases_io' /), userRoutine=model_routine_Run, rc=rc)
+    call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_RUN, phaseLabelList=(/ 'geogate_phases_io' /), userRoutine=model_routine_Run, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, specPhaseLabel="cop_phases_io", specRoutine=cop_phases_io_run, rc=rc)
+    call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, specPhaseLabel="geogate_phases_io", specRoutine=cop_phases_io_run, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     ! Python phase
-    call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_RUN, phaseLabelList=(/ 'cop_phases_python' /), userRoutine=model_routine_Run, rc=rc)
+    call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_RUN, phaseLabelList=(/ 'geogate_phases_python' /), userRoutine=model_routine_Run, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, specPhaseLabel="cop_phases_python", specRoutine=cop_phases_python_run, rc=rc)
+    call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, specPhaseLabel="geogate_phases_python", specRoutine=cop_phases_python_run, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     ! ParaView Catalyst phase
-    call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_RUN, phaseLabelList=(/"cop_phases_catalyst"/), userRoutine=model_routine_Run, rc=rc)
+    call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_RUN, phaseLabelList=(/"geogate_phases_catalyst"/), userRoutine=model_routine_Run, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, specPhaseLabel="cop_phases_catalyst", specRoutine=cop_phases_catalyst_run, rc=rc)
+    call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, specPhaseLabel="geogate_phases_catalyst", specRoutine=cop_phases_catalyst_run, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     !------------------
@@ -1022,4 +1022,4 @@ contains
 
   end subroutine Advance
 
-end module cop_comp_nuopc
+end module geogate_nuopc
