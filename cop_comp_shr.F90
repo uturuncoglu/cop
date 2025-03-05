@@ -31,6 +31,7 @@ module cop_comp_shr
   ! Public module data
   !-----------------------------------------------------------------------------
 
+  logical, public :: debugMode
   real(ESMF_KIND_R8), public, parameter :: CONST_PI = 3.14159265358979323846_ESMF_KIND_R8
   real(ESMF_KIND_R8), public, parameter :: CONST_RAD2DEG = 180.0_ESMF_KIND_R8/CONST_PI
 

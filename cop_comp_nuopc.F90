@@ -58,6 +58,7 @@ module cop_comp_nuopc
   use cop_comp_shr, only: ChkErr
   use cop_comp_shr, only: FB_init_pointer
   use cop_comp_shr, only: StringSplit
+  use cop_comp_shr, only: debugMode
   
   use cop_comp_internalstate, only: InternalState
   use cop_comp_internalstate, only: InternalStateInit 
@@ -587,7 +588,10 @@ contains
     ! local variables
     integer :: n
     type(InternalState) :: is_local
+    logical :: isPresent, isSet
     logical, save :: first_call = .true.
+    character(len=255) :: cvalue
+    character(len=255) :: msg
     character(len=*), parameter :: subname = trim(modName)//':(DataInitialize) '
     !---------------------------------------------------------------------------
 
@@ -625,6 +629,16 @@ contains
     call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", value="true", rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
     call ESMF_LogWrite("COP - Initialize-Data-Dependency allDone check Passed", ESMF_LOGMSG_INFO)
+
+    ! Get generic options
+    call NUOPC_CompAttributeGet(gcomp, name='DebugMode', value=cvalue, isPresent=isPresent, isSet=isSet, rc=rc)
+    if (chkerr(rc,__LINE__,u_FILE_u)) return
+    debugMode = .false.
+    if (isPresent .and. isSet) then
+       if (trim(cvalue) .eq. '.true.' .or. trim(cvalue) .eq. 'true') debugMode = .true.
+    end if
+    write(msg, fmt='(A,L)') trim(subname)//' : DebugMode = ', debugMode
+    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 

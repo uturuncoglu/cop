@@ -27,6 +27,7 @@ module cop_phases_catalyst
 
   use cop_comp_shr, only: ChkErr, StringSplit
   use cop_comp_shr, only: CONST_RAD2DEG
+  use cop_comp_shr, only: debugMode
   use cop_comp_internalstate, only: InternalState
 
   use, intrinsic :: iso_c_binding, only: C_PTR
@@ -181,14 +182,18 @@ contains
        ! Add MPI communicator
        call catalyst_conduit_node_set_path_int32(node, "catalyst/mpi_comm", mpiComm)
 
-       ! Save node for debugging purposes, if needed
-       !write(message, fmt='(A,I3.3,A,I3.3)') "init_node_"//trim(timeStr)//"_", localPet, "_", petCount
-       !call catalyst_conduit_node_save(node, trim(message)//".json", "json")
+       ! Debug statements
+       if (debugMode) then
+          ! Save node information
+          write(message, fmt='(A,I3.3,A,I3.3)') "init_node_"//trim(timeStr)//"_", localPet, "_", petCount
+          call catalyst_conduit_node_save(node, trim(message)//".json", "json")
 
-       ! Print node information with details about memory allocation
-       !info = catalyst_conduit_node_create()
-       !call catalyst_conduit_node_info(node, info)
-       !call catalyst_conduit_node_print(info)
+          ! Print node information with details about memory allocation
+          info = catalyst_conduit_node_create()
+          call catalyst_conduit_node_info(node, info)
+          call catalyst_conduit_node_print(info)
+          call catalyst_conduit_node_destroy(info)
+       end if
 
        ! Initialize catalyst
        err = c_catalyst_initialize(node)
@@ -201,7 +206,6 @@ contains
 
        ! Destroy node which is not required
        call catalyst_conduit_node_destroy(node)
-       !call catalyst_conduit_node_destroy(info)
 
        ! Allocate arrays to store mesh information for each connected component
        allocate(myMesh(is_local%wrap%numComp))
@@ -225,18 +229,18 @@ contains
        if (ChkErr(rc,__LINE__,u_FILE_u)) return
     end do
 
-    ! Save node for debugging purposes, if needed
-    !write(message, fmt='(A,I3.3,A,I3.3)') "exec_node_"//trim(timeStr)//"_", localPet, "_", petCount
-    !call catalyst_conduit_node_save(node, trim(message)//".json", "json")
+    ! Debug statements
+    if (debugMode) then
+       ! Save node information
+       write(message, fmt='(A,I3.3,A,I3.3)') "exec_node_"//trim(timeStr)//"_", localPet, "_", petCount
+       call catalyst_conduit_node_save(node, trim(message)//".json", "json")
 
-    ! Print node information with details about memory allocation
-    !info = catalyst_conduit_node_create()
-    !call catalyst_conduit_node_info(node, info)
-    !call catalyst_conduit_node_print(info)
-
-    ! Verify mesh
-    !res = conduit_blueprint_mesh_verify(node, info)
-    !call catalyst_conduit_node_print(info)
+       ! Print node information with details about memory allocation
+       info = catalyst_conduit_node_create()
+       call catalyst_conduit_node_info(node, info)
+       call catalyst_conduit_node_print(info)
+       call catalyst_conduit_node_destroy(info)
+    end if
 
     ! Execute catalyst
     err = c_catalyst_execute(node)
@@ -249,7 +253,6 @@ contains
 
     ! Destroy nodes
     call catalyst_conduit_node_destroy(node)
-    !call catalyst_conduit_node_destroy(info)
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
