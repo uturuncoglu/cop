@@ -1,11 +1,11 @@
-project(cop_catalyst Fortran)
-if(COP_USE_CATALYST)
-  set(SRCFILES cop_phases_catalyst.F90)
+project(geogate_catalyst Fortran)
+if(GEOGATE_USE_CATALYST)
+  set(SRCFILES geogate_phases_catalyst.F90)
 else()
-  set(SRCFILES cop_phases_catalyst_void.F90)
+  set(SRCFILES geogate_phases_catalyst_void.F90)
 endif()
 
-add_library(cop_catalyst ${SRCFILES})
+add_library(geogate_catalyst ${SRCFILES})
 
 message(INFO "catalyst_DIR = ${catalyst_DIR}")
 if(catalyst_FOUND)
@@ -15,10 +15,10 @@ if(catalyst_FOUND)
   endif()
 endif()
 
-install(TARGETS cop_catalyst
-        EXPORT  cop_catalyst
+install(TARGETS geogate_catalyst
+        EXPORT  geogate_catalyst
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         COMPONENT Library)
-install(EXPORT  cop_catalyst 
+install(EXPORT  geogate_catalyst 
         DESTINATION lib/cmake)

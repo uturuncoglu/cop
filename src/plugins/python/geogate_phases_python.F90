@@ -1,4 +1,4 @@
-module cop_phases_python
+module geogate_phases_python
 
   !-----------------------------------------------------------------------------
   ! Phase for Python interaction 
@@ -28,10 +28,10 @@ module cop_phases_python
   use, intrinsic :: iso_c_binding, only : C_PTR
   use conduit
 
-  use cop_comp_shr, only: ChkErr
-  use cop_comp_shr, only: CONST_RAD2DEG
-  use cop_comp_internalstate, only: InternalState
-  use cop_python_interface, only: conduit_fort_to_py
+  use geogate_share, only: ChkErr
+  use geogate_share, only: CONST_RAD2DEG
+  use geogate_internalstate, only: InternalState
+  use geogate_python_interface, only: conduit_fort_to_py
 
   implicit none
   private
@@ -40,7 +40,7 @@ module cop_phases_python
   ! Public module routines
   !-----------------------------------------------------------------------------
 
-  public :: cop_phases_python_run
+  public :: geogate_phases_python_run
 
   !-----------------------------------------------------------------------------
   ! Private module routines
@@ -55,14 +55,14 @@ module cop_phases_python
   character(ESMF_MAXSTR) :: scriptName
 
 
-  character(len=*), parameter :: modName = "(cop_phases_python)"
+  character(len=*), parameter :: modName = "(geogate_phases_python)"
   character(len=*), parameter :: u_FILE_u = __FILE__
 
 !===============================================================================
 contains
 !===============================================================================
 
-  subroutine cop_phases_python_run(gcomp, rc)
+  subroutine geogate_phases_python_run(gcomp, rc)
 
     ! input/output variables
     type(ESMF_GridComp)  :: gcomp
@@ -81,7 +81,7 @@ contains
     character(len=ESMF_MAXSTR) :: timeStr
     character(ESMF_MAXSTR) :: cvalue
     character(ESMF_MAXSTR) :: message
-    character(len=*), parameter :: subname = trim(modName)//':(cop_phases_python_run) '
+    character(len=*), parameter :: subname = trim(modName)//':(geogate_phases_python_run) '
     !---------------------------------------------------------------------------
 
     rc = ESMF_SUCCESS
@@ -177,7 +177,7 @@ contains
 
     call ESMF_LogWrite(subname//' done', ESMF_LOGMSG_INFO)
 
-  end subroutine cop_phases_python_run
+  end subroutine geogate_phases_python_run
 
   !-----------------------------------------------------------------------------
 
@@ -375,4 +375,4 @@ contains
 
   end subroutine StateToNode
 
-end module cop_phases_python
+end module geogate_phases_python

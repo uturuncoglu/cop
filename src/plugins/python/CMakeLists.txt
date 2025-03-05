@@ -1,24 +1,24 @@
-project(cop_python Fortran C)
-if(COP_USE_PYTHON)
-  set(SRCFILES cop_phases_python.F90
-               cop_python_interface.F90
-               cop_python_interface.cpp
+project(geogate_python Fortran C)
+if(GEOGATE_USE_PYTHON)
+  set(SRCFILES geogate_phases_python.F90
+               geogate_python_interface.F90
+               geogate_python_interface.cpp
                python_interpreter.cpp
-	       ../../cop_comp_internalstate.F90
-               ../../cop_comp_shr.F90)
+	       ../../geogate_comp_internalstate.F90
+               ../../geogate_comp_shr.F90)
 else()
-  set(SRCFILES cop_phases_python_void.F90)
+  set(SRCFILES geogate_phases_python_void.F90)
 endif()
 
-add_library(cop_python ${SRCFILES})
-target_include_directories(cop_python PRIVATE ${CONDUIT_INCLUDE_DIRS})
-target_include_directories(cop_python PRIVATE ${Python_INCLUDE_DIRS})
-target_include_directories(cop_python PRIVATE ${CONDUIT_PYTHON_MODULE_DIR}/conduit)
+add_library(geogate_python ${SRCFILES})
+target_include_directories(geogate_python PRIVATE ${CONDUIT_INCLUDE_DIRS})
+target_include_directories(geogate_python PRIVATE ${Python_INCLUDE_DIRS})
+target_include_directories(geogate_python PRIVATE ${CONDUIT_PYTHON_MODULE_DIR}/conduit)
 
-install(TARGETS cop_python
-        EXPORT  cop_python
+install(TARGETS geogate_python
+        EXPORT  geogate_python
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         COMPONENT Library)
-install(EXPORT  cop_python
+install(EXPORT  geogate_python
         DESTINATION lib/cmake)

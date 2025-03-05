@@ -1,4 +1,4 @@
-module cop_python_interface
+module geogate_python_interface
 
   !-----------------------------------------------------------------------------
   ! Void phase for Python interaction 
@@ -33,7 +33,7 @@ module cop_python_interface
   ! Private module data
   !-----------------------------------------------------------------------------
 
-  character(len=*), parameter :: modName = "(cop_python_interface)"
+  character(len=*), parameter :: modName = "(geogate_python_interface)"
   character(len=*), parameter :: u_FILE_u = __FILE__
 
 !===============================================================================
@@ -60,4 +60,4 @@ contains
 
   end function conduit_fort_from_py
 
-end module cop_python_interface
+end module geogate_python_interface
