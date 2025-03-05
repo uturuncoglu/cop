@@ -8,7 +8,9 @@ GeoGate is an open source project that provides a generic way to interact with t
 Documentation
 =============
 
-N/A
+To get more information and use GeoGate, check out the full documentation:
+
+https://geogate.readthedocs.io/en/latest/
 
 Source Repo
 ===========
