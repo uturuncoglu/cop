@@ -1,5 +1,5 @@
-GeoGate
-=======
+
+![geogate](https://github.com/user-attachments/assets/f0a728b0-3626-4f51-873b-822069702402)
 
 **GeoGate: Bridging Earth System Model Components**
 
