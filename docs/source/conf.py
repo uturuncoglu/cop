@@ -36,3 +36,11 @@ numfig = True
 
 html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
+
+# try to use the read the docs theme
+try:
+    import sphinx_rtd_theme
+    html_theme = "sphinx_rtd_theme"
+    html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+except:
+    pass
