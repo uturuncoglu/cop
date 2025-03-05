@@ -20,8 +20,7 @@ extensions = [
     "sphinx.ext.githubpages",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
-    "sphinx.ext.viewcode",
-    "sphinxcontrib.programoutput"
+    "sphinx.ext.viewcode"
 ]
 
 templates_path = ['_templates']
@@ -29,6 +28,8 @@ exclude_patterns = ['_build']
 pygments_style = 'sphinx'
 source_suffix = ".rst"
 main_doc = "index"
+todo_include_todos = True
+numfig = True
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
