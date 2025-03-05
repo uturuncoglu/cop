@@ -15,17 +15,20 @@ release = 'main'
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    'sphinx.ext.autodoc',
-    'sphinx.ext.doctest',
-    'sphinxcontrib.jquery',
-    'sphinx.ext.todo',
-    'sphinx.ext.coverage',
-    'sphinx.ext.mathjax'
+    "sphinx.ext.todo",
+    "sphinx.ext.coverage",
+    "sphinx.ext.githubpages",
+    "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
+    "sphinx.ext.viewcode",
+    "sphinxcontrib.programoutput"
 ]
 
 templates_path = ['_templates']
 exclude_patterns = ['_build']
 pygments_style = 'sphinx'
+source_suffix = ".rst"
+main_doc = "index"
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
