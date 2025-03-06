@@ -17,7 +17,7 @@ module geogate_phases_catalyst
   use ESMF, only: ESMF_MAXSTR, ESMF_KIND_R8
   use ESMF, only: ESMF_STATEITEM_FIELD, ESMF_STATEITEM_STATE
   use ESMF, only: ESMF_Mesh, ESMF_MeshGet
-  use ESMF, only: ESMF_CoordSys_Flag, ESMF_COORDSYS_SPH_DEG
+  use ESMF, only: ESMF_CoordSys_Flag, ESMF_COORDSYS_SPH_DEG, ESMF_COORDSYS_SPH_RAD
 
   use NUOPC, only: NUOPC_CompAttributeGet
   use NUOPC_Model, only: NUOPC_ModelGet
@@ -26,7 +26,7 @@ module geogate_phases_catalyst
   use catalyst_conduit
 
   use geogate_share, only: ChkErr, StringSplit
-  use geogate_share, only: CONST_RAD2DEG
+  use geogate_share, only: rad2Deg, deg2Rad, constHalfPi
   use geogate_share, only: debugMode
   use geogate_internalstate, only: InternalState
 
@@ -56,12 +56,14 @@ module geogate_phases_catalyst
     character(ESMF_MAXSTR) :: elementShape
     real(ESMF_KIND_R8), allocatable :: nodeCoordsX(:)
     real(ESMF_KIND_R8), allocatable :: nodeCoordsY(:)
+    real(ESMF_KIND_R8), allocatable :: nodeCoordsZ(:)
     integer, allocatable :: elementTypes(:)
     integer, allocatable :: elementTypesShape(:)
     integer, allocatable :: elementTypesOffset(:)
     integer, allocatable :: elementConn(:)
   end type meshType
 
+  logical :: convertToCart
   type(meshType), allocatable :: myMesh(:)
   character(len=*), parameter :: modName = "(geogate_phases_catalyst)"
   character(len=*), parameter :: u_FILE_u = __FILE__
@@ -133,6 +135,17 @@ contains
     if (first_time) then
        ! This node will hold the information nessesary to initialize ParaViewCatalyst
        node = catalyst_conduit_node_create()
+
+       ! Option to enable converting lat-lon to cartesian coordinates
+       call NUOPC_CompAttributeGet(gcomp, name="CatalystConvertToCart", value=cvalue, &
+         isPresent=isPresent, isSet=isSet, rc=rc)
+       if (ChkErr(rc,__LINE__,u_FILE_u)) return
+       convertToCart = .false.
+       if (isPresent .and. isSet) then
+          if (trim(cvalue) .eq. '.true.' .or. trim(cvalue) .eq. 'true') convertToCart = .true.
+       end if
+       write(message, fmt='(A,L)') trim(subname)//' : CatalystConvertToCart = ', convertToCart
+       call ESMF_LogWrite(trim(message), ESMF_LOGMSG_INFO)
 
        ! Query name of Catalyst script
        call NUOPC_CompAttributeGet(gcomp, name="CatalystScripts", value=cvalue, &
@@ -281,6 +294,7 @@ contains
     type(ESMF_CoordSys_Flag) :: coordSys
     real(ESMF_KIND_R8), pointer :: farrayPtr(:)
     real(ESMF_KIND_R8), allocatable :: nodeCoords(:)
+    real(ESMF_KIND_R8) :: theta, phi
     character(ESMF_MAXSTR), allocatable :: itemNameList(:)
     type(ESMF_StateItem_Flag), allocatable :: itemTypeList(:)
     character(ESMF_MAXSTR) :: message
@@ -328,6 +342,7 @@ contains
                 ! Allocate coordinate and element type arrays
                 allocate(myMesh(id)%nodeCoordsX(myMesh(id)%nodeCount))
                 allocate(myMesh(id)%nodeCoordsY(myMesh(id)%nodeCount))
+                allocate(myMesh(id)%nodeCoordsZ(myMesh(id)%nodeCount))
                 allocate(myMesh(id)%elementTypes(myMesh(id)%elementCount))
                 allocate(myMesh(id)%elementTypesShape(myMesh(id)%elementCount))
                 allocate(myMesh(id)%elementTypesOffset(myMesh(id)%elementCount))
@@ -353,10 +368,40 @@ contains
                 end do
                 deallocate(nodeCoords)
 
-                ! Convert coordinates from radian to degree
-                if (coordSys /= ESMF_COORDSYS_SPH_DEG) then
-                   myMesh(id)%nodeCoordsX = myMesh(id)%nodeCoordsX*CONST_RAD2DEG
-                   myMesh(id)%nodeCoordsY = myMesh(id)%nodeCoordsY*CONST_RAD2DEG
+                ! Convert lat-lon to cartesian
+                print*, "burda - ", convertToCart, coordSys == ESMF_COORDSYS_SPH_DEG, coordSys == ESMF_COORDSYS_SPH_RAD
+                if (convertToCart) then
+                   ! Calculate cartesian coordinates
+                   if (coordSys == ESMF_COORDSYS_SPH_DEG) then
+                      print*, "hoho"
+                      do m = 1, myMesh(id)%nodeCount
+                         if (myMesh(id)%nodeCoordsY(m) == 90.0d0) then
+                            myMesh(id)%nodeCoordsX(m) = 0.0d0
+                            myMesh(id)%nodeCoordsY(m) = 0.0d0
+                            myMesh(id)%nodeCoordsZ(m) = 1.0d0
+                         else if (myMesh(id)%nodeCoordsY(m) == -90.0d0) then
+                            myMesh(id)%nodeCoordsX(m) = 0.0d0
+                            myMesh(id)%nodeCoordsY(m) = 0.0d0
+                            myMesh(id)%nodeCoordsZ(m) = -1.0d0
+                         else
+                            theta = myMesh(id)%nodeCoordsX(m)*deg2Rad
+                            phi = (90.0d0-myMesh(id)%nodeCoordsY(m))*deg2Rad
+                            myMesh(id)%nodeCoordsX(m) = cos(theta)*sin(phi)
+                            myMesh(id)%nodeCoordsY(m) = sin(theta)*sin(phi)
+                            myMesh(id)%nodeCoordsZ(m) = cos(phi)
+                         end if
+                      end do
+                   else if (coordSys == ESMF_COORDSYS_SPH_RAD) then
+                      do m = 1, myMesh(id)%nodeCount
+                         theta = myMesh(id)%nodeCoordsX(m)
+                         phi = constHalfPi-myMesh(id)%nodeCoordsY(m)
+                         myMesh(id)%nodeCoordsX(m) = cos(theta)*sin(phi)
+                         myMesh(id)%nodeCoordsY(m) = sin(theta)*sin(phi)
+                         myMesh(id)%nodeCoordsZ(m) = cos(phi)
+                      end do
+                   end if
+                else
+                   myMesh(id)%nodeCoordsZ(:) = 0.0d0
                 end if
 
                 ! Find out element types
@@ -408,6 +453,8 @@ contains
                    myMesh(id)%nodeCoordsX, int8(myMesh(id)%nodeCount))
                 call catalyst_conduit_node_set_path_external_float64_ptr(mesh, "coordsets/coords/values/y", &
                    myMesh(id)%nodeCoordsY, int8(myMesh(id)%nodeCount))
+                call catalyst_conduit_node_set_path_external_float64_ptr(mesh, "coordsets/coords/values/z", &
+                   myMesh(id)%nodeCoordsZ, int8(myMesh(id)%nodeCount))
 
                 ! Add topology
                 call catalyst_conduit_node_set_path_char8_str(mesh, "topologies/mesh/type", "unstructured")
