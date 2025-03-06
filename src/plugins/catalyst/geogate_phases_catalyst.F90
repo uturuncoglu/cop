@@ -61,6 +61,10 @@ module geogate_phases_catalyst
     integer, allocatable :: elementTypesShape(:)
     integer, allocatable :: elementTypesOffset(:)
     integer, allocatable :: elementConn(:)
+    logical :: elementMaskIsPresent
+    integer, allocatable :: elementMask(:)
+    logical :: nodeMaskIsPresent
+    integer, allocatable :: nodeMask(:)
   end type meshType
 
   logical :: convertToCart
@@ -336,7 +340,8 @@ contains
 
                 ! Extract required information from mesh
                 call ESMF_MeshGet(fmesh, spatialDim=spatialDim, nodeCount=myMesh(id)%nodeCount, &
-                   elementCount=myMesh(id)%elementCount)
+                   elementCount=myMesh(id)%elementCount, nodeMaskIsPresent=myMesh(id)%nodeMaskIsPresent, &
+                   elementMaskIsPresent=myMesh(id)%elementMaskIsPresent, rc=rc)
                 if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
                 ! Allocate coordinate and element type arrays
@@ -369,11 +374,9 @@ contains
                 deallocate(nodeCoords)
 
                 ! Convert lat-lon to cartesian
-                print*, "burda - ", convertToCart, coordSys == ESMF_COORDSYS_SPH_DEG, coordSys == ESMF_COORDSYS_SPH_RAD
                 if (convertToCart) then
                    ! Calculate cartesian coordinates
                    if (coordSys == ESMF_COORDSYS_SPH_DEG) then
-                      print*, "hoho"
                       do m = 1, myMesh(id)%nodeCount
                          if (myMesh(id)%nodeCoordsY(m) == 90.0d0) then
                             myMesh(id)%nodeCoordsX(m) = 0.0d0
@@ -402,6 +405,19 @@ contains
                    end if
                 else
                    myMesh(id)%nodeCoordsZ(:) = 0.0d0
+                end if
+
+                ! Get mask information
+                if (myMesh(id)%elementMaskIsPresent) then
+                   allocate(myMesh(id)%elementMask(myMesh(id)%elementCount))
+                   call ESMF_MeshGet(fmesh, elementMask=myMesh(id)%elementMask, rc=rc)
+                   if (ChkErr(rc,__LINE__,u_FILE_u)) return
+                end if
+
+                if (myMesh(id)%nodeMaskIsPresent) then
+                   allocate(myMesh(id)%nodeMask(myMesh(id)%nodeCount))
+                   call ESMF_MeshGet(fmesh, nodeMask=myMesh(id)%nodeMask, rc=rc)
+                   if (ChkErr(rc,__LINE__,u_FILE_u)) return
                 end if
 
                 ! Find out element types
@@ -469,6 +485,22 @@ contains
 
                 ! Create node for fields
                 fields = catalyst_conduit_node_fetch(mesh, "fields")
+
+                ! Add mask information
+                if (myMesh(id)%elementMaskIsPresent) then
+                   call catalyst_conduit_node_set_path_char8_str(fields, "element_mask/association", "element")
+                   call catalyst_conduit_node_set_path_char8_str(fields, "element_mask/topology", "mesh")
+                   call catalyst_conduit_node_set_path_char8_str(fields, "element_mask/volume_dependent", "false")
+                   call catalyst_conduit_node_set_path_external_int32_ptr(fields, "element_mask/values", &
+                      myMesh(id)%elementMask, int8(myMesh(id)%elementCount))
+                end if
+                if (myMesh(id)%nodeMaskIsPresent) then
+                   call catalyst_conduit_node_set_path_char8_str(fields, "node_mask/association", "vertex")
+                   call catalyst_conduit_node_set_path_char8_str(fields, "node_mask/topology", "mesh")
+                   call catalyst_conduit_node_set_path_char8_str(fields, "node_mask/volume_dependent", "false")
+                   call catalyst_conduit_node_set_path_external_int32_ptr(fields, "node_mask/values", &
+                      myMesh(id)%nodeMask, int8(myMesh(id)%nodeCount))
+                end if
              end if
 
              ! Query field pointer
